@@ -1,12 +1,9 @@
 """Target-frame pose sampling. Pure numpy, no Isaac Sim deps."""
 
 from __future__ import annotations
-import os
-import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vision_core.pose_utils import generate_random_offsets, generate_grid_offsets, offset_to_4x4, add_rotation
 
 

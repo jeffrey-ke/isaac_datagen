@@ -5,10 +5,6 @@ proposal network against each object's canonical reference image, and serializes
 one ReferenceSegSample per (frame, object) to disk.
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from pathlib import Path
 
 import numpy as np

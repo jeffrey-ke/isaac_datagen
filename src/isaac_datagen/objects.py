@@ -1,7 +1,6 @@
 """Scene objects for Isaac Sim warehouse simulation."""
 
 import os
-import sys
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +9,6 @@ import numpy as np
 import yaml
 from PIL import Image as PILImage
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vision_core.datastructs import SerializableSample
 
 from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty

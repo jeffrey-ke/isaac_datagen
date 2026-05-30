@@ -5,10 +5,6 @@ writer that composites alpha from instance segmentation, extracts world2cam
 and intrinsics from camera_params, and calls StereoSample.serialize().
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from pathlib import Path
 
 import numpy as np
