@@ -1,0 +1,48 @@
+[project]
+name = "isaac-datagen"
+version = "0.1.0"
+description = "Isaac Sim Replicator-based stereo data generation for visual servoing."
+readme = "README.md"
+authors = [
+    { name = "Jeffrey Ke", email = "jeffke613@gmail.com" }
+]
+requires-python = ">=3.11"
+# numpy/torch/pillow left unpinned: isaacsim hard-pins numpy==1.26.0,
+# pillow==11.3.0 and drives torch==2.7.0. reference-matching is deliberately
+# loose so it floats to those versions (proven resolvable alongside diffusers
+# 0.37 / transformers 5.9 / lightglue).
+dependencies = [
+    "isaacsim[all,extscache]==5.1.0",
+    "numpy",
+    "scipy",
+    "torch",
+    "torchvision",
+    "omegaconf>=2.3.0",
+    "pyyaml>=6.0",
+    "vision-core",
+    "reference-matching",
+]
+
+[project.scripts]
+# reference_segmentation is the primary entry; stereo-only datagen is `main`.
+isaac-datagen = "isaac_datagen.clean_datagen:reference_segmentation"
+isaac-datagen-stereo = "isaac_datagen.clean_datagen:main"
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+vision-core = { path = "../vision_core", editable = true }
+reference-matching = { path = "../reference_matching", editable = true }
+# Transitive (via reference-matching); these sources must be declared here too —
+# uv.sources from path deps do not propagate to the consuming project.
+lightglue = { git = "https://github.com/cvg/LightGlue.git", rev = "eb42fee2d71449efb0aa5c10549752b5d75384d8" }
+gim = { path = "../gim", editable = true }
+
+# Isaac Sim and its omni*/kit* sub-deps are published on NVIDIA's index, not PyPI.
+# Non-explicit so it acts as an --extra-index-url fallback for those packages.
+# https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_python.html
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
