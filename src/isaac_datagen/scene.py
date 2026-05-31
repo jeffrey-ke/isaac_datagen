@@ -173,13 +173,13 @@ def register_box_texture_jitter(rep, replicator, texture_paths, shader_paths):
     replicator.register(randomize_box_textures)
 
 
-def make_replicator(runtime, target2world):
+def make_replicator(runtime):
     import omni.replicator.core as rep
 
     replicator = ReplicatorWrapper(rep)
-    world_lo, world_hi = _target_range_to_world(runtime, target2world)
+    # world_lo, world_hi = _target_range_to_world(runtime, target2world)
 
-    register_sphere_jitter(rep, replicator, "/World/SphereLight", world_lo, world_hi)
+    # register_sphere_jitter(rep, replicator, "/World/SphereLight", world_lo, world_hi)
     register_distant_jitter(rep, replicator, "/World/DistantLight")
     if runtime.dome_light:
         register_dome_jitter(rep, replicator, "/World/DomeLight")

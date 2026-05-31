@@ -78,14 +78,16 @@ def reference_segmentation():
 
     writer = ReferenceSegWriter(runtime.proposer_config_path, runtime.descriptor_config_path, scene.objects, render_dir, runtime.descriptor_device, runtime.proposer_device)
 
-    grasp_point = scene.grasp_points[rng.randint(len(scene.grasp_points))]
+    idx = rng.choice(len(scene.grasp_points), size=runtime.num_targets)
+    grasp_points = [scene.grasp_points[i] for i in idx]
 
-    target2world = get_target2world(grasp_point)
-    replicator = make_replicator(runtime, target2world)
+    target2worlds = get_target2world(grasp_points)
+    replicator = make_replicator(runtime)
     target_frame_poses = plan_poses(
         runtime.target_to_baseline_ypr_desired, runtime.xrange, runtime.yrange, runtime.zrange, runtime.sampling
     )
-    world_poses = target2world @ target_frame_poses
+    # (B, N, 4, 4) -> (B*N, 4, 4): flatten target and pose dims into one batch.
+    world_poses = np.einsum('bij,njk->bnik', target2worlds, target_frame_poses).reshape(-1, 4, 4)
 
     capture_with_poses(world_poses, writer, scene.zed, replicator)
 

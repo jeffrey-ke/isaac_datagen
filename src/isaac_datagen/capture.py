@@ -11,13 +11,25 @@ from scipy.spatial.transform import Rotation as R
 from isaac_datagen.pose_planning import plan_poses
 
 
-def get_target2world(target_path):
+def get_target2world(target_paths):
+    """Compute local-to-world SE3 poses for a batch of prim paths.
+
+    Args:
+        target_paths: sequence of prim paths.
+
+    Returns:
+        (B, 4, 4) array of target-to-world SE3 matrices.
+    """
     from pxr import UsdGeom, Usd
     from isaacsim.core.utils.stage import get_current_stage
-    target_prim = get_current_stage().GetPrimAtPath(target_path)
-    xformable = UsdGeom.Xformable(target_prim)
-    gf_matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-    return np.array(gf_matrix).T
+    stage = get_current_stage()
+    poses = []
+    for target_path in target_paths:
+        target_prim = stage.GetPrimAtPath(target_path)
+        xformable = UsdGeom.Xformable(target_prim)
+        gf_matrix = xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+        poses.append(np.array(gf_matrix).T)
+    return np.stack(poses)
 
 
 def broadcast(a: Sequence, b: Sequence):

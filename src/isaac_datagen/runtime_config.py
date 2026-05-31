@@ -21,6 +21,7 @@ from omegaconf import OmegaConf
 @dataclass
 class RuntimeConfig:
     idx: int
+    num_targets: int
     scene: str
     dataset_dir: str
     intrinsics_path: str
