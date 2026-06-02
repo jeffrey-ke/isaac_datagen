@@ -73,7 +73,7 @@ def reference_segmentation():
     from isaac_datagen.reference_seg_writer import ObsMaskWriter
 
     rng = np.random.RandomState(runtime.seed)
-    objects = collect_objects(runtime.graspable_objects_path)[4:11]
+    objects = collect_objects(runtime.graspable_objects_path)
     scene = build_scene(runtime, objects, rng)
 
     writer = ObsMaskWriter(runtime.descriptor_config_path, runtime.descriptor_device, scene.objects, render_dir)

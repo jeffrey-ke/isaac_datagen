@@ -27,7 +27,6 @@ class RuntimeConfig:
     intrinsics_path: str
 
     descriptor_device: str
-    proposer_device: str
 
     graspable_objects_path: str
 
@@ -59,7 +58,7 @@ class RuntimeConfig:
     texture_streaming_budget: float = 0.6
     debug_material_type: int = -1
     xrange: tuple[float, float] = (0.550, 0.550)
-    yrange: tuple[float, float] = (-0.22, 0.)
+    yrange: tuple[float, float] = (-0.22, 0.22)
     zrange: tuple[float, float] = (0.01, 0.01)
     target_to_baseline_ypr_desired: tuple[float, float, float] = (90, 0, 90)
     dome_light: bool = False

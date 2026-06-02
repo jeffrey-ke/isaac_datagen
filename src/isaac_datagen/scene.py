@@ -60,7 +60,16 @@ def create_stack_of_objects(parent_path, objects: List[GraspableObject], dims: t
     stack_prim = create_prim(f"{parent_path}/stack", "Xform")
     stack_path = stack_prim.GetPath().pathString
 
+    # OccupancyGrid here is a STATIC FULL-WALL policy: the grid is all-ones, so
+    # every slot must receive a box -- otherwise is_top/is_graspable describe
+    # phantom boxes that were never placed. Enforce that the caller supplies
+    # enough objects to fill the wall.
     capacity = dims[0] * dims[1] * dims[2]
+    if len(objects) < capacity:
+        raise ValueError(
+            f"create_stack_of_objects: full-wall pallet {tuple(dims)} needs {capacity} "
+            f"objects, got {len(objects)}. Supply more objects or shrink pallet_dims."
+        )
     prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects[:capacity]]
 
     occupancy_grid_placer = OccupancyGrid(dims, bbox_size_of(prim_paths_added[0]))
