@@ -228,9 +228,9 @@ def boot_sim(runtime, render_dir):
         "headless": True,
         "width": runtime.width,
         "height": runtime.height,
-        "multi_gpu": False,
-        "active_gpu": 0,
-        "physics_gpu": 0,
+        "multi_gpu": True,
+        # "active_gpu": 0,
+        # "physics_gpu": 0,
     })
 
     import carb.settings
