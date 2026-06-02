@@ -1,8 +1,10 @@
-"""Replicator writer that generates ReferenceSegSamples from a mono camera render.
+"""Replicator writer that emits one ObsMask per rendered frame (NN-free).
 
-For each frame: identifies labeled objects by instance ID, runs a descriptor and
-proposal network against each object's canonical reference image, and serializes
-one ReferenceSegSample per (frame, object) to disk.
+Per frame it serializes only the genuinely per-frame-unique payload — the RGBA
+observation and the (H, W) instance-id mask. The constant object catalog
+(reference images, precomputed DIFT descriptors, instance-id → name) is written
+once per render dir via ``finalize_metadata`` as an ``ObsMaskMetadata``. The
+expensive proposer forward is deferred to a phase-2 pass (see ``add_proposals``).
 """
 
 from pathlib import Path
@@ -14,7 +16,7 @@ from torchvision import tv_tensors
 
 from omni.replicator.core import AnnotatorRegistry, Writer
 
-from vision_core.datastructs import ReferenceSegSample
+from vision_core.datastructs import ObsMask, ObsMaskMetadata
 
 
 def _pil_to_tv_rgba(pil_img: PILImage.Image) -> tv_tensors.Image:
@@ -24,24 +26,24 @@ def _pil_to_tv_rgba(pil_img: PILImage.Image) -> tv_tensors.Image:
     return tv_tensors.Image(torch.from_numpy(arr).permute(2, 0, 1))
 
 
-def alpha_from_instance_seg(seg: np.ndarray) -> np.ndarray:
-    return (seg > 0).astype(np.uint8) * 255
+def alpha_from_instance_seg(seg: np.ndarray, valid_ids) -> np.ndarray:
+    """Opaque only where ``seg`` is a graspable instance id; the workbench and
+    background carry ids outside ``valid_ids`` and become transparent."""
+    return np.isin(seg, list(valid_ids)).astype(np.uint8) * 255
 
 
-def composite_rgba(rgb: np.ndarray, seg: np.ndarray) -> np.ndarray:
-    alpha = alpha_from_instance_seg(seg)
+def composite_rgba(rgb: np.ndarray, seg: np.ndarray, valid_ids) -> np.ndarray:
+    alpha = alpha_from_instance_seg(seg, valid_ids)
     return np.concatenate([rgb[:, :, :3], alpha[:, :, None]], axis=-1)
 
 
-class ReferenceSegWriter(Writer):
+class ObsMaskWriter(Writer):
     def __init__(
         self,
-        proposal_config_path: str,
         descriptor_config_path: str,
+        descriptor_device: str,
         object_specs,
         render_dir: str | Path,
-        descriptor_device: str,
-        proposer_device: str,
     ):
         self.data_structure = "renderProduct"
         self.annotators = [
@@ -53,16 +55,23 @@ class ReferenceSegWriter(Writer):
         ]
         self._render_dir = Path(render_dir)
         self._frame_id = 0
+        self.id_to_name: dict[int, str] = {}
+
         self.names_to_ref = {
             obj.meta["name"]: _pil_to_tv_rgba(obj.reference_image)
             for obj in object_specs
         }
-        from reference_matching import proposal as proposal_module
+
+        # Precompute the constant reference DIFT features once (only ~11 objects),
+        # then drop the descriptor so per-frame write() stays NN-free.
         from reference_matching import descriptor as descriptor_module
-        self.proposer = proposal_module.from_config(proposal_config_path).to(proposer_device)
-        self.descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
-        self.descriptor_device = descriptor_device
-        self.proposer_device = proposer_device
+        descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
+        with torch.inference_mode():
+            self.names_to_descriptors = {
+                name: descriptor(tv_rgba.unsqueeze(0).to(descriptor_device)).squeeze().cpu()
+                for name, tv_rgba in self.names_to_ref.items()
+            }
+        del descriptor
 
     def attach(self, *rps):
         rp = rps[0]
@@ -76,37 +85,26 @@ class ReferenceSegWriter(Writer):
         labels = rp["instance_segmentation_fast"]["idToSemantics"]
 
         # Only instances carrying an "instance" semantic are graspable objects;
-        # BACKGROUND and UNLABELLED scenery (e.g. the workbench) carry no such
-        # key and are skipped.
-        id_to_name = {int(k): v["instance"] for k, v in labels.items() if "instance" in v}
-
-        if not id_to_name:
+        # BACKGROUND and UNLABELLED scenery (e.g. the workbench) carry no such key.
+        frame_id_to_name = {
+            int(k): v["instance"] for k, v in labels.items() if "instance" in v
+        }
+        if not frame_id_to_name:
             raise ValueError("write() called with no labeled instances — expected ≥1")
+        self.id_to_name.update(frame_id_to_name)
 
-        obs_rgba = composite_rgba(rgb_hw3, seg_hw)
-        obs_tensor = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
+        obs_rgba = composite_rgba(rgb_hw3, seg_hw, frame_id_to_name.keys())
+        obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
+        id_mask = tv_tensors.Mask(torch.from_numpy(seg_hw.astype(np.int32)))
 
-        seg_tensor = torch.from_numpy(seg_hw)
+        ObsMask(obs=obs, id_mask=id_mask).serialize(self._frame_id, self._render_dir)
+        self._frame_id += 1
 
-        unique_ids = list(id_to_name.keys())
-        B = len(unique_ids)
-
-        obs_1chw = obs_tensor.unsqueeze(0)
-
-        with torch.inference_mode():
-            for uid in unique_ids:
-                ref_img = self.names_to_ref[id_to_name[uid]].unsqueeze(0)
-                seg_mask = (seg_tensor == uid).bool()
-
-                ref_features = self.descriptor(ref_img.to(self.descriptor_device))
-                (xy, scores), = self.proposer(obs_1chw.to(self.proposer_device), ref_img.to(self.proposer_device))
-
-                sample = ReferenceSegSample(
-                    rgb=tv_tensors.Image(obs_tensor),
-                    ref_rgb=tv_tensors.Image(ref_img[0]),
-                    seg_mask=tv_tensors.Mask(seg_mask),
-                    proposal_coordinates=xy.cpu(),
-                    reference_features=ref_features[0].cpu(),
-                )
-                sample.serialize(self._frame_id, self._render_dir)
-                self._frame_id += 1
+    def finalize_metadata(self, directory: str | Path | None = None):
+        """Serialize the per-render-dir catalog once (at idx=0). Call after capture."""
+        directory = Path(directory) if directory is not None else self._render_dir
+        ObsMaskMetadata(
+            id_to_name=self.id_to_name,
+            name_to_ref=self.names_to_ref,
+            name_to_descriptors=self.names_to_descriptors,
+        ).serialize(0, directory)

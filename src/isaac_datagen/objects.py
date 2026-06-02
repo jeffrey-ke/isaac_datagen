@@ -9,7 +9,11 @@ import numpy as np
 import yaml
 from PIL import Image as PILImage
 
-from vision_core.datastructs import SerializableSample
+from vision_core.datastructs import SerializableSample, ReferenceSegSample
+# ObsMask / PreReferenceSegSample / ObsMaskMetadata live in vision_core.datastructs
+# (the shared package) so the sibling `segmentation-train` env — which can't take an
+# isaacsim dependency — can import them too. Re-exported here for convenience.
+from vision_core.datastructs import ObsMask, PreReferenceSegSample, ObsMaskMetadata
 
 from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty
 

@@ -70,13 +70,13 @@ def reference_segmentation():
     render_dir.mkdir(parents=True, exist_ok=True)
     app = boot_sim(runtime, render_dir)
 
-    from isaac_datagen.reference_seg_writer import ReferenceSegWriter
+    from isaac_datagen.reference_seg_writer import ObsMaskWriter
 
     rng = np.random.RandomState(runtime.seed)
     objects = collect_objects(runtime.graspable_objects_path)[4:11]
     scene = build_scene(runtime, objects, rng)
 
-    writer = ReferenceSegWriter(runtime.proposer_config_path, runtime.descriptor_config_path, scene.objects, render_dir, runtime.descriptor_device, runtime.proposer_device)
+    writer = ObsMaskWriter(runtime.descriptor_config_path, runtime.descriptor_device, scene.objects, render_dir)
 
     idx = rng.choice(len(scene.grasp_points), size=runtime.num_targets)
     grasp_points = [scene.grasp_points[i] for i in idx]
@@ -91,10 +91,11 @@ def reference_segmentation():
 
     capture_with_poses(world_poses, writer, scene.zed, replicator)
 
+    # Write the per-render-dir catalog (id_to_name + reference images + DIFT features).
+    writer.finalize_metadata(render_dir)
+
     with open(render_dir / 'runtime.yaml', 'w') as f:
         yaml.safe_dump(asdict(runtime), f)
-    with open(render_dir / 'proposer.yaml', 'w') as f:
-        yaml.safe_dump(yaml.safe_load(Path(runtime.proposer_config_path).read_text()), f)
     with open(render_dir / 'descriptor.yaml', 'w') as f:
         yaml.safe_dump(yaml.safe_load(Path(runtime.descriptor_config_path).read_text()), f)
 
