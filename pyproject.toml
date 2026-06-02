@@ -27,6 +27,8 @@ dependencies = [
 # reference_segmentation is the primary entry; stereo-only datagen is `main`.
 isaac-datagen = "isaac_datagen.clean_datagen:reference_segmentation"
 isaac-datagen-stereo = "isaac_datagen.clean_datagen:main"
+# phase-2 (no Isaac): add proposer point-prompts onto a rendered ObsMask dataset.
+isaac-datagen-proposals = "isaac_datagen.add_proposals:main"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
