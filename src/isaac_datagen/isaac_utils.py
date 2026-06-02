@@ -261,3 +261,87 @@ def bottom_face_center(prim):
     bbox_range = local_bbox_range(prim)
     center = bbox_range.GetMidpoint()
     return (center[0], bbox_range.GetMin()[1], bbox_range.GetMin()[2])
+
+
+def export_subtree_usdz(stage, subtree_path, output_dir, base_name="scene"):
+    """Export one prim subtree of a live Isaac Sim stage to a standalone .usdz.
+
+    The exported package inlines all geometry, materials, and textures of every
+    descendant of ``subtree_path`` and is fully self-contained (no external
+    references). Safe to call from inside a running Isaac Sim process.
+
+    Strategy (the "reference-and-flatten" idiom):
+      1. Build a brand-new in-memory stage with ``Usd.Stage.CreateInMemory()``.
+         We never call ``Usd.Stage.Open(file)`` — inside Isaac Sim that call is
+         intercepted and returns the active sim stage, which would silently make
+         us operate on (and corrupt) the live scene.
+      2. On that solo stage, define a single root prim and add a *reference* to
+         the live stage's root layer, targeting ``subtree_path``. A reference
+         composes the ENTIRE named subtree as one arc, so all children (and their
+         own nested references to per-object usdz files) come along — this avoids
+         the "flatten drops all but the first sibling" failure.
+      3. Set the solo stage's defaultPrim — a standalone layer without one
+         exports as an invalid/near-empty package.
+      4. ``solo.Export(temp.usdc)`` flattens the single reference arc into a
+         concrete layer on disk, resolving every nested reference and material.
+      5. ``UsdUtils.CreateNewUsdzPackage`` walks that layer's asset dependencies
+         (textures/HDRs) and zips them into the .usdz with rewritten in-package
+         relative paths. (The ``@N/foo.ext@`` resolve warnings it prints are a
+         red herring — the files ARE bundled, often under a numbered subfolder.)
+
+    Args:
+        stage: The live USD stage to export from.
+        subtree_path: Prim path of the subtree to isolate, e.g. "/World".
+        output_dir: Directory to write the .usdz into.
+        base_name: Stem for the output file.
+
+    Returns:
+        str: Absolute path to the created .usdz.
+    """
+    import os
+    import tempfile
+    from pxr import Usd, UsdUtils
+
+    src_prim = stage.GetPrimAtPath(subtree_path)
+    if not src_prim or not src_prim.IsValid():
+        raise ValueError(f"No valid prim at {subtree_path!r} on the given stage")
+
+    # 1. Fresh in-memory stage — never Usd.Stage.Open(file) inside Isaac Sim.
+    solo = Usd.Stage.CreateInMemory()
+
+    # 2. One root prim that *references* the subtree of the live root layer.
+    export_prim = solo.DefinePrim(f"/{src_prim.GetName()}")
+    export_prim.GetReferences().AddReference(
+        assetPath=stage.GetRootLayer().identifier,
+        primPath=subtree_path,
+    )
+
+    # 3. A standalone layer MUST name a defaultPrim or it exports invalid/tiny.
+    solo.SetDefaultPrim(export_prim)
+
+    os.makedirs(output_dir, exist_ok=True)
+    usdz_path = os.path.join(output_dir, f"{base_name}.usdz")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # 4. Export flattens the reference arc into a concrete on-disk layer.
+        temp_usd = os.path.join(temp_dir, f"{base_name}.usdc")
+        if not solo.Export(temp_usd):
+            raise RuntimeError(f"solo.Export({temp_usd}) returned False")
+        # 5. Package the layer + discovered asset dependencies into .usdz.
+        if not UsdUtils.CreateNewUsdzPackage(temp_usd, usdz_path):
+            raise RuntimeError("UsdUtils.CreateNewUsdzPackage returned False")
+
+    if not os.path.exists(usdz_path) or os.path.getsize(usdz_path) == 0:
+        raise RuntimeError(f"USDZ packaging produced no/empty file at {usdz_path}")
+
+    return usdz_path
+
+
+def export_flattened_usdz(stage, output_dir, base_name="scene"):
+    """Export the stage's defaultPrim subtree (for these scenes, "/World")."""
+    default_prim = stage.GetDefaultPrim()
+    if not default_prim or not default_prim.IsValid():
+        raise ValueError("Stage has no valid defaultPrim to export")
+    return export_subtree_usdz(
+        stage, default_prim.GetPath().pathString, output_dir, base_name=base_name
+    )
