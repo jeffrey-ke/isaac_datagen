@@ -209,7 +209,7 @@ def make_dome_light(stage, parent, intensity=1000.0):
     return dome_prim
 
 
-def make_sphere_light(stage, parent, intensity=500000.0, radius=0.1):
+def make_sphere_light(stage, parent, intensity=5000.0, radius=0.1):
     from pxr import UsdLux
     from isaacsim.core.utils.prims import create_prim
     path = f"{parent}/SphereLight"
