@@ -37,6 +37,39 @@ def composite_rgba(rgb: np.ndarray, seg: np.ndarray, valid_ids) -> np.ndarray:
     return np.concatenate([rgb[:, :, :3], alpha[:, :, None]], axis=-1)
 
 
+def _occlusion_by_mask_id(occ, id_to_labels, instance_mappings, present_ids) -> dict[int, float]:
+    """Map per-frame occlusion ratios onto ``instance_segmentation_fast`` mask ids.
+
+    The ``occlusion`` annotator keys ratios by *leaf-prim* id, while the seg mask keys by
+    *semantic-instance* id — different, non-aligned id spaces (verified in a kit probe). Both
+    sides expose the geo prim path, so we bridge ``leaf id → path`` via ``instance_mappings``
+    (its ``instanceIds`` are the leaf ids occlusion keys on, ``name`` is the path) and
+    ``path → mask id`` via the seg payload's ``idToLabels``.
+
+    Returns ``{mask_id: ratio}`` for every id in ``present_ids``; an id with no occlusion
+    measurement (e.g. fully outside the frustum → NaN row) maps to ``float('nan')`` so the
+    caller can tell "unknown" apart from "unoccluded". Leaf ratios are averaged per object so
+    a (hypothetical) multi-mesh asset still yields one number; our assets are single-mesh.
+    """
+    occ_by_leaf = {
+        int(r["instanceId"]): float(r["occlusionRatio"])
+        for r in occ
+        if not np.isnan(r["occlusionRatio"])
+    }
+    path_to_occ: dict[str, float] = {}
+    for row in instance_mappings:
+        vals = [occ_by_leaf[int(l)] for l in row["instanceIds"] if int(l) in occ_by_leaf]
+        if vals:
+            path_to_occ[row["name"]] = float(np.mean(vals))
+
+    out = {i: float("nan") for i in present_ids}
+    for mask_id in present_ids:
+        path = id_to_labels.get(mask_id, id_to_labels.get(str(mask_id)))
+        if path in path_to_occ:
+            out[mask_id] = path_to_occ[path]
+    return out
+
+
 class ObsMaskWriter(Writer):
     def __init__(
         self,
@@ -52,6 +85,9 @@ class ObsMaskWriter(Writer):
                 "instance_segmentation_fast",
                 init_params={"colorize": False},
             ),
+            # Per-leaf-prim occlusion ratio (0=unoccluded … 1=fully occluded). Keyed by
+            # leaf-prim id, NOT the mask's semantic-instance id — see _occlusion_by_mask_id.
+            AnnotatorRegistry.get_annotator("occlusion"),
         ]
         self._render_dir = Path(render_dir)
         self._frame_id = 0
@@ -93,11 +129,23 @@ class ObsMaskWriter(Writer):
             raise ValueError("write() called with no labeled instances — expected ≥1")
         self.id_to_name.update(frame_id_to_name)
 
+        # Per-instance occlusion, keyed by the same ids as id_mask (graspable ids actually
+        # present this frame — the set add_proposals later filters on).
+        from omni.syntheticdata.scripts import helpers
+        present_ids = {int(i) for i in np.unique(seg_hw)} & set(frame_id_to_name)
+        id_to_occlusion = _occlusion_by_mask_id(
+            rp["occlusion"]["data"],
+            rp["instance_segmentation_fast"]["idToLabels"],
+            helpers.get_instance_mappings(),
+            present_ids,
+        )
+
         obs_rgba = composite_rgba(rgb_hw3, seg_hw, frame_id_to_name.keys())
         obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
         id_mask = tv_tensors.Mask(torch.from_numpy(seg_hw.astype(np.int32)))
 
-        ObsMask(obs=obs, id_mask=id_mask).serialize(self._frame_id, self._render_dir)
+        ObsMask(obs=obs, id_mask=id_mask, id_to_occlusion=id_to_occlusion) \
+            .serialize(self._frame_id, self._render_dir)
         self._frame_id += 1
 
     def finalize_metadata(self, directory: str | Path | None = None):

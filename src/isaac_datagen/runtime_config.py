@@ -27,6 +27,7 @@ class RuntimeConfig:
     intrinsics_path: str
 
     descriptor_device: str
+    proposer_device: str
 
     graspable_objects_path: str
 
