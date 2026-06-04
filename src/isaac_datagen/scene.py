@@ -281,7 +281,8 @@ def build_scene(runtime, objects: List[GraspableObject], rng):
     world_prim = create_prim("/World", "Xform")
     stage.SetDefaultPrim(world_prim)
 
-    load_asset("/World/Workbench", os.path.join(RESOURCE_PATH, "workbench_world.usd"))
+    if runtime.scene != "empty":
+        load_asset("/World/Workbench", os.path.join(RESOURCE_PATH, "workbench_world.usd"))
 
     make_dome_light(stage, "/World", intensity=1000.0 if runtime.dome_light else 0.0)
     make_sphere_light(stage, "/World")
