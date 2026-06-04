@@ -1,0 +1,76 @@
+"""Visualize ImageInlierSample inlier/outlier labels — a sanity check for phase-3.
+
+Thin CLI over ``vision_core.viz``: per selected frame, deserialize the
+ImageInlierSample, build the inlier figure (overview panel of all class union
+masks + one proposal panel per class — green = inlier / red = outlier, union
+outline, canonical-ref thumbnail), and save it. All rendering primitives live
+in ``vision_core.viz`` (see ``inlier_figure`` and the leaves it composes).
+
+Usage:
+    isaac-datagen-viz-inliers <render_dir> [--out DIR] [--frames 0,5,10 |
+        --max-frames K --stride S] [--cols 4] [--dpi 300] [--max-points N]
+Requires phase-3 output (``labels/``); run ``isaac-datagen-inliers`` first.
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+
+from vision_core.datastructs import ImageInlierSample, ObsMaskMetadata, count_samples
+from vision_core.viz import inlier_figure, save_figure
+
+
+def select_frames(n_frames, explicit, stride, max_frames):
+    """CSV spec like "0,5,10" → those indices; else range(0, n, stride)[:max]."""
+    if explicit:
+        return [int(x) for x in explicit.split(",") if x.strip()]
+    return list(range(0, n_frames, stride))[:max_frames]
+
+
+def main():
+    p = argparse.ArgumentParser(description="Visualize ImageInlierSample inlier/outlier labels.")
+    p.add_argument("render_dir", type=Path)
+    p.add_argument("--out", type=Path, default=None)
+    p.add_argument("--frames", type=str, default=None, help="comma-separated frame indices")
+    p.add_argument("--max-frames", type=int, default=8)
+    p.add_argument("--stride", type=int, default=1)
+    p.add_argument("--cols", type=int, default=4)
+    p.add_argument("--dpi", type=int, default=300)
+    p.add_argument("--max-points", type=int, default=None)
+    args = p.parse_args()
+
+    render_dir = args.render_dir
+    if not (render_dir / "labels").exists():
+        print(f"no labels/ in {render_dir} — run isaac-datagen-inliers first", file=sys.stderr)
+        sys.exit(1)
+
+    md = ObsMaskMetadata.deserialize(0, render_dir)
+    n_frames = count_samples(render_dir)
+    frames = select_frames(n_frames, args.frames, args.stride, args.max_frames)
+
+    out_dir = args.out or render_dir.parent / (render_dir.name + "_viz_inliers")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"visualizing {len(frames)} frame(s) from {render_dir} → {out_dir}")
+
+    for idx in frames:
+        if idx >= n_frames:
+            print(f"  frame {idx}: out of range (n_frames={n_frames}) — skipping")
+            continue
+        sample = ImageInlierSample.deserialize(idx, render_dir)
+        fig = inlier_figure(sample, md, cols=args.cols, max_points=args.max_points,
+                            title=f"{render_dir.name}  frame {idx:04d}")
+        if fig is None:
+            print(f"  frame {idx:04d}: no labeled classes — skipping")
+            continue
+        out_path = out_dir / f"sample_{idx:04d}.png"
+        save_figure(fig, out_path, args.dpi)
+        print(f"  wrote {out_path}")
+
+    print(f"done → {out_dir}")
+
+
+if __name__ == "__main__":
+    main()
