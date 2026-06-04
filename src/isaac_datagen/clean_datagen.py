@@ -91,7 +91,7 @@ def reference_segmentation():
 
     capture_with_poses(world_poses, writer, scene.zed, replicator)
 
-    # Write the per-render-dir catalog (id_to_name + reference images + DIFT features).
+    # Write the per-render-dir catalog (id-space maps + per-class reference images + DIFT features).
     writer.finalize_metadata(render_dir)
 
     with open(render_dir / 'runtime.yaml', 'w') as f:

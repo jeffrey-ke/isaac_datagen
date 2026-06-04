@@ -43,6 +43,10 @@ class RuntimeConfig:
     width: int = 1920
     height: int = 1080
 
+    # Phase-2 proposals: skip objects whose occlusion ratio is ≥ this. A class is
+    # kept if its best-visible member passes; NaN (unknown) never passes.
+    proposer_max_occlusion: float = 0.10
+
     # RTX render cost / VRAM tuning (consumed by boot_sim). Defaults preserve the
     # prior hardcoded behavior; lower these to trade render quality/speed for VRAM.
     #
