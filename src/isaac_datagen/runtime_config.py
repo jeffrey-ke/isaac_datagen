@@ -35,9 +35,11 @@ class RuntimeConfig:
     descriptor_config_path: str
 
     pallet_dims: tuple[int, int, int]
+    dome_light: bool
 
     num_frames: int | None = None
     grid_dims: tuple[int, int, int] | None = None
+
 
     seed: int = 1
     width: int = 1920
@@ -66,7 +68,6 @@ class RuntimeConfig:
     yrange: tuple[float, float] = (-0.22, 0.22)
     zrange: tuple[float, float] = (0.01, 0.01)
     target_to_baseline_ypr_desired: tuple[float, float, float] = (90, 0, 90)
-    dome_light: bool = False
 
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()
