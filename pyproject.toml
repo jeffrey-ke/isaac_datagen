@@ -15,6 +15,7 @@ dependencies = [
     "isaacsim[all,extscache]==5.1.0",
     "numpy",
     "scipy",
+    "matplotlib",
     "torch",
     "torchvision",
     "omegaconf>=2.3.0",
@@ -29,10 +30,25 @@ isaac-datagen = "isaac_datagen.clean_datagen:reference_segmentation"
 isaac-datagen-stereo = "isaac_datagen.clean_datagen:main"
 # phase-2 (no Isaac): add proposer point-prompts onto a rendered ObsMask dataset.
 isaac-datagen-proposals = "isaac_datagen.add_proposals:main"
+# phase-3 (no Isaac): label each proposal inlier/outlier for verifier training.
+isaac-datagen-inliers = "isaac_datagen.add_inlier_data:main"
+# viz (no Isaac): sanity-check the inlier/outlier labels on a rendered dataset.
+isaac-datagen-viz-inliers = "isaac_datagen.viz_inliers:main"
+# viz (no Isaac): spot-check ObsMask per-instance occlusion ratios on a random sample.
+isaac-datagen-viz-occlusion = "isaac_datagen.viz_occlusion:main"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv]
+# The MSDeformAttn CUDA op builds against the env's torch (its setup.py imports torch).
+no-build-isolation-package = ["multiscaledeformableattention"]
+# detectron2 is a prebuilt wheel whose pt<torch><cuda> tag MUST match this env's exact torch
+# (isaacsim drives torch 2.7.0+cu128). Without this exact pin, uv picks the lexically-highest
+# variant from the index (e.g. pt2.9.1cu130) and imports die on libcudart.so.13 / undefined
+# torch symbols. Constraint, not a [project] pin, so it doesn't propagate further.
+constraint-dependencies = ["detectron2==0.6+fd27788pt2.7.0cu128"]
 
 [tool.uv.sources]
 vision-core = { path = "../vision_core", editable = true }
@@ -41,6 +57,9 @@ reference-matching = { path = "../reference_matching", editable = true }
 # uv.sources from path deps do not propagate to the consuming project.
 lightglue = { git = "https://github.com/cvg/LightGlue.git", rev = "eb42fee2d71449efb0aa5c10549752b5d75384d8" }
 gim = { path = "../gim", editable = true }
+detectron2 = { index = "torch-packages-builder" }
+mask2former = { path = "../Mask2Former", editable = true }
+multiscaledeformableattention = { path = "../Mask2Former/mask2former/modeling/pixel_decoder/ops" }
 
 # Isaac Sim and its omni*/kit* sub-deps are published on NVIDIA's index, not PyPI.
 # Non-explicit so it acts as an --extra-index-url fallback for those packages.
@@ -48,3 +67,11 @@ gim = { path = "../gim", editable = true }
 [[tool.uv.index]]
 name = "nvidia"
 url = "https://pypi.nvidia.com"
+
+# Community prebuilt wheels for packages without official binaries (detectron2). Version strings
+# encode the torch/CUDA ABI — see the constraint-dependencies pin above, which must move in
+# lockstep with torch.
+[[tool.uv.index]]
+name = "torch-packages-builder"
+url = "https://miropsota.github.io/torch_packages_builder"
+explicit = true
