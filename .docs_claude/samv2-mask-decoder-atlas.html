@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>samv2-mask-decoder-atlas.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> or <div class="page"></div> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="samv2-mask-decoder--atlas">SAMv2 Mask Decoder — Atlas</h1>
+<p>Multi-level map of <code>SAMV2MaskDecoder</code> from the muggled_sam repo
+(<code>/home/jeffk/repo/muggled_sam/muggled_sam/v2_sam/</code>).
+Each plate expands one node from the plate above. Solid edges = tensor flow,
+dotted = optional input, line refs point into the source files.</p>
+<table>
+<thead>
+<tr>
+<th>Plate</th>
+<th>Class</th>
+<th>File</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>SAMV2MaskDecoder</code></td>
+<td><code>mask_decoder_model.py:21</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>MaskDecoderTransformer</code> (TwoWayTransformer)</td>
+<td><code>components/mask_decoder_transformer.py:20</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>CrossAttentionBlock</code> (TwoWayAttentionBlock)</td>
+<td><code>components/mask_decoder_transformer.py:94</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Attention wrappers (<code>CrossAttentionNormed</code> / <code>SelfAttentionNormed</code> / <code>SelfAttentionNoPosenc</code>)</td>
+<td><code>components/mask_decoder_attention.py:111-159</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>GenericAttention</code></td>
+<td><code>components/mask_decoder_attention.py:19</code></td>
+</tr>
+<tr>
+<td>5a</td>
+<td><code>MaskGen</code> + <code>MaskUpscalerWithHiresSupport</code></td>
+<td><code>mask_decoder_model.py:272, 348</code></td>
+</tr>
+<tr>
+<td>5b</td>
+<td><code>ObjectPointerGen</code></td>
+<td><code>mask_decoder_model.py:475</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="plate-0--samv2maskdecoder-mask_decoder_modelpy21">Plate 0 — <code>SAMV2MaskDecoder</code> (mask_decoder_model.py:21)</h2>
+<p>The big idea: each output head owns a <strong>learned query token</strong> (DETR-style) that rides
+through the transformer alongside the prompt tokens. The transformer charges those
+tokens with content; the heads just decode them.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph INPUTS["inputs — forward :85"]
+        lowres["lowres img tokens<br/>B×256×64×64"]
+        hires2["hires_x2 tokens<br/>B×64×128×128"]
+        hires4["hires_x4 tokens<br/>B×32×256×256"]
+        prompts["encoded prompts<br/>B×N×256"]
+        posenc["image posenc<br/>B×256×64×64"]
+        hint["mask_hint (optional)<br/>B×1×256×256"]
+    end
+
+    clsparams["learned cls tokens :68-70<br/>obj ×1 + iou ×1 + mask ×4<br/>(DETR-style learned queries)"]
+
+    mhe["MaskHintEncoder :395<br/>conv-downscale hint (1→4→16→256 ch),<br/>else learned no-mask embed;<br/>ADDED onto every image token"]
+    cat["concat :138-144<br/>[obj, iou, mask×4, prompts]<br/>→ B×(6+N)×256"]
+    xfmr["MaskDecoderTransformer :145<br/>two-way attention — Plate 1"]
+    split["split cls tokens back out :148-151"]
+
+    maskgen["MaskGen :154 — Plate 5a"]
+    ioumlp["iou_token_mlp :155<br/>MLP3Layers + sigmoid"]
+    objgen["ObjectPointerGen :158 — Plate 5b"]
+
+    masks(["mask_preds B×4×256×256"])
+    ious(["iou_preds B×4"])
+    score(["obj_score B"])
+    ptrs(["obj_ptrs B×4×256"])
+
+    lowres --> mhe
+    hint -.-> mhe
+    clsparams --> cat
+    prompts --> cat
+    mhe -- "img tokens B×256×64×64" --> xfmr
+    cat -- "prompt tokens B×(6+N)×256" --> xfmr
+    posenc --> xfmr
+
+    xfmr -- "encoded prompt tokens" --> split
+    xfmr -- "encoded img tokens<br/>B×256×64×64" --> maskgen
+    hires2 --> maskgen
+    hires4 --> maskgen
+
+    split -- "mask_tokens [:,2:,:]" --> maskgen
+    split -- "iou_token [:,1,:]" --> ioumlp
+    split -- "obj_token [:,0,:]" --> objgen
+    split -- "mask_tokens [:,2:,:]" --> objgen
+
+    maskgen --> masks
+    ioumlp --> ious
+    objgen --> score
+    objgen --> ptrs
+</div></code></pre>
+<p>V2-vs-V1 deltas visible at this level: the obj token / <code>ObjectPointerGen</code> (video
+memory) and the hires_x2/x4 skip inputs into <code>MaskGen</code> (hierarchical Hiera encoder).</p>
+<hr>
+<h2 id="plate-1--maskdecodertransformer-mask_decoder_transformerpy20">Plate 1 — <code>MaskDecoderTransformer</code> (mask_decoder_transformer.py:20)</h2>
+<p>The &quot;TwoWayTransformer&quot;: depth=2 blocks + one final prompt→image cross-attention.</p>
+<p>Two design moves live here:</p>
+<ul>
+<li>image tokens are flattened to a sequence at entry, restored at exit (:74, :87)</li>
+<li><strong>prompt tokens are their own positional encoding</strong> (:79): captured once, frozen,
+re-injected at <em>every</em> attention layer — the prompts' identity never washes out.</li>
+</ul>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    ptok_in["prompt tokens B×(6+N)×256"]
+    itok_in["image tokens B×256×64×64"]
+    ipos_in["image posenc B×256×64×64"]
+
+    flatten["flatten :74-75<br/>B×C×H×W → B×4096×256"]
+    snapshot["prompt_posenc = prompt_tokens :79<br/>(frozen snapshot, reused every layer)"]
+
+    blk0["CrossAttentionBlock layer 0 :47<br/>skip_selfattn_posenc=True — Plate 2"]
+    blk1["CrossAttentionBlock layer 1 :47<br/>— Plate 2"]
+    final["final_prompt_crossattn :51, :84<br/>CrossAttentionNormed — prompts get<br/>one last read of the updated image"]
+    unflatten["unflatten :87<br/>B×4096×256 → B×256×64×64"]
+
+    ptok_out(["encoded prompt tokens B×(6+N)×256"])
+    itok_out(["encoded image tokens B×256×64×64"])
+
+    itok_in --> flatten
+    ipos_in --> flatten
+    ptok_in --> snapshot
+    ptok_in --> blk0
+
+    flatten -- "img tokens, img posenc<br/>(2 separate seq tensors —<br/>NOT summed; posenc re-added<br/>per layer, Q/K only)" --> blk0
+    snapshot -. "prompt_posenc (every layer)" .-> blk0
+    snapshot -. "prompt_posenc" .-> blk1
+    snapshot -. "prompt_posenc" .-> final
+
+    blk0 -- "prompt toks, img toks" --> blk1
+    blk1 -- "prompt toks" --> final
+    blk1 -- "img toks" --> unflatten
+    blk1 -- "img toks (as K,V)" --> final
+
+    final --> ptok_out
+    unflatten --> itok_out
+</div></code></pre>
+<hr>
+<h2 id="plate-2--crossattentionblock-mask_decoder_transformerpy94">Plate 2 — <code>CrossAttentionBlock</code> (mask_decoder_transformer.py:94)</h2>
+<p>One &quot;two-way&quot; block = 4 strictly sequential ops (:149-152). Steps 1–3 update the
+prompt side; step 4 flips the roles so the <strong>image</strong> queries the prompts — image
+tokens leave already reshaped around the prompt, which is what makes the
+dot-product readout in MaskGen work.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    pin["prompt tokens"]
+    ppos["prompt posenc (frozen snapshot)"]
+    iin["image tokens"]
+    ipos["image posenc"]
+
+    sa["1. prompt_selfattn :149<br/>SelfAttentionNormed — Plate 3<br/>(layer 0: SelfAttentionNoPosenc,<br/>since tokens ≡ posenc there)"]
+    ca1["2. prompt_crossattn :150<br/>CrossAttentionNormed — Plate 3<br/>Q=prompts, K,V=image<br/>'what is at my location?'"]
+    mlp["3. prompt_mlpnorm :151<br/>MLP2LayersNormed :159<br/>256→2048→256, ReLU,<br/>residual + LayerNorm"]
+    ca2["4. image_crossattn :152<br/>CrossAttentionNormed — Plate 3<br/>Q=image, K,V=prompts (post step 3!)<br/>image reshapes around the prompt"]
+
+    pout(["prompt tokens out"])
+    iout(["image tokens out"])
+
+    pin --> sa
+    ppos -.-> sa
+    sa --> ca1
+    ppos -.-> ca1
+    iin -- "K,V" --> ca1
+    ipos -.-> ca1
+    ca1 --> mlp
+    mlp -- "K,V" --> ca2
+    mlp --> pout
+    ppos -.-> ca2
+    iin -- "Q" --> ca2
+    ipos -.-> ca2
+    ca2 --> iout
+</div></code></pre>
+<hr>
+<h2 id="plate-3--attention-wrappers-mask_decoder_attentionpy111-159">Plate 3 — Attention wrappers (mask_decoder_attention.py:111-159)</h2>
+<p>The most distinctive design decision in the module. All wrappers share one pattern:</p>
+<ul>
+<li><strong>posenc goes into Q and K only, never V</strong> — position decides <em>who attends to whom</em>;
+the content that flows is position-free. Re-added fresh at every layer.</li>
+<li><strong>post-norm residual</strong> taken from the <em>raw</em> (pre-posenc) tokens:
+<code>norm(a_tokens + attn_result)</code> — unlike the pre-norm ViT convention.</li>
+</ul>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    subgraph CAN["CrossAttentionNormed :111"]
+        a1["a_tokens (query side)"]
+        ap1["a_posenc"]
+        b1["b_tokens (context side)"]
+        bp1["b_posenc"]
+        attn1["GenericAttention — Plate 4<br/>Q = a_tokens + a_posenc<br/>K = b_tokens + b_posenc<br/>V = b_tokens  ← RAW, no posenc"]
+        res1["residual: a_tokens (raw) + attn_out"]
+        norm1["LayerNorm (post-norm)"]
+        out1(["encoded a_tokens"])
+
+        a1 --> attn1
+        ap1 -.-> attn1
+        b1 --> attn1
+        bp1 -.-> attn1
+        a1 -- "raw skip" --> res1
+        attn1 --> res1
+        res1 --> norm1 --> out1
+    end
+
+    subgraph SAN["SelfAttentionNormed :138"]
+        note2["same pattern with b := a<br/>Q = K = a + posenc, V = a raw<br/>norm(a + attn)"]
+    end
+
+    subgraph SNP["SelfAttentionNoPosenc :159"]
+        note3["layer-0 prompt self-attn only:<br/>norm(attn(x, x, x))<br/>no posenc AND no residual"]
+    end
+</div></code></pre>
+<hr>
+<h2 id="plate-4--genericattention-mask_decoder_attentionpy19">Plate 4 — <code>GenericAttention</code> (mask_decoder_attention.py:19)</h2>
+<p>Vanilla multi-head attention with one twist: an <strong>internal feature bottleneck</strong>.
+Cross-attention layers run at <code>internal_features = downsample_dim = 128</code> (half the
+256-d token width) because they span 4096 image tokens; self-attention layers run
+full-width 256 since they only span ~10 prompt tokens. Bottleneck applied exactly
+where the token count is large.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    q_in["q: B×Nq×256"]
+    k_in["k: B×Nk×256"]
+    v_in["v: B×Nk×256"]
+
+    qp["q_proj :60<br/>256 → F' (128 cross / 256 self)"]
+    kp["k_proj :61<br/>256 → F'"]
+    vp["v_proj :62<br/>256 → F'"]
+
+    reshape["split heads :93-95<br/>B×N×F' → B×H×N×(F'/H)<br/>H=8 heads"]
+    sdpa["scaled_dot_product_attention :98<br/>softmax(QKᵀ/√d)·V"]
+    merge["merge heads :104<br/>B×H×Nq×f → B×Nq×F'"]
+    op["out_proj :65<br/>F' → 256"]
+
+    out(["encoded q tokens B×Nq×256"])
+
+    q_in --> qp --> reshape
+    k_in --> kp --> reshape
+    v_in --> vp --> reshape
+    reshape --> sdpa --> merge --> op --> out
+</div></code></pre>
+<hr>
+<h2 id="plate-5a--maskgen-mask_decoder_modelpy272--upscaler-348">Plate 5a — <code>MaskGen</code> (mask_decoder_model.py:272) + upscaler (:348)</h2>
+<p>The readout is a <strong>dot product</strong>: each mask token becomes a dynamic 1×1-conv filter
+applied to the upscaled image tokens — <code>einsum(&quot;bnc,bchw-&gt;bnhw&quot;)</code> (:343).
+The upscaler is where the V2 hires skip connections land.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    lowtok["encoded img tokens<br/>B×256×64×64"]
+    h2["hires_x2 B×64×128×128"]
+    h4["hires_x4 B×32×256×256"]
+    mtok["cls mask tokens B×4×256"]
+
+    subgraph UPS["MaskUpscalerWithHiresSupport :348"]
+        up1["ConvTranspose2d ×2 :366<br/>256ch → 64ch, 64² → 128²"]
+        add1["+ hires_x2, LayerNorm2d, GELU :382-384"]
+        up2["ConvTranspose2d ×2 :368<br/>64ch → 32ch, 128² → 256²"]
+        add2["+ hires_x4, GELU :387-388"]
+    end
+
+    mlps["4× per-token MLP3Layers :300<br/>256 → 32 (match upscaler channels)"]
+    einsum["einsum bnc,bchw→bnhw :343<br/>dot product over channels"]
+    out(["mask_preds B×4×256×256"])
+
+    lowtok --> up1 --> add1 --> up2 --> add2
+    h2 --> add1
+    h4 --> add2
+    mtok --> mlps
+    mlps -- "B×4×32" --> einsum
+    add2 -- "B×32×256×256" --> einsum
+    einsum --> out
+</div></code></pre>
+<hr>
+<h2 id="plate-5b--objectpointergen-mask_decoder_modelpy475--v2-only">Plate 5b — <code>ObjectPointerGen</code> (mask_decoder_model.py:475) — V2 only</h2>
+<p>Object score (is anything masked?) from the obj token; per-mask pointers (video
+memory representation) from the mask tokens, gated by the score.</p>
+<pre><code class="language-mermaid"><div class="mermaid">flowchart TB
+    otok["encoded obj token B×256"]
+    mtok["encoded mask tokens B×4×256"]
+    noptr["no_ptr_embed :492<br/>learned fallback pointer"]
+
+    smlp["score_mlp :493<br/>MLP3Layers 256 → 1"]
+    pmlp["pointer_mlp :494<br/>MLP3Layers 256 → 256"]
+    gate["gate :527-528<br/>score > 0 ? pointers : no_ptr_embed"]
+
+    score(["obj_score B<br/>(+5ish = object present, &lt;0 = none)"])
+    ptrs(["obj_ptrs B×4×256<br/>→ video memory fusion"])
+
+    otok --> smlp --> score
+    smlp --> gate
+    mtok --> pmlp --> gate
+    noptr -.-> gate
+    gate --> ptrs
+</div></code></pre>
+<hr>
+<h2 id="tldr">TL;DR</h2>
+<p>Two (+1 final) asymmetric two-way blocks where prompts self-attend, then prompts
+and image cross-attend in <em>both directions</em> alternately; posenc is Q/K-only and
+re-injected every layer (prompts acting as their own posenc); cross-attention is
+bottlenecked to 128-d for the 4096-token image side; and the whole transformer
+exists to charge up 6 learned cls tokens whose dot products / MLP decodings <em>are</em>
+the outputs.</p>
+
+</body>
+</html>
