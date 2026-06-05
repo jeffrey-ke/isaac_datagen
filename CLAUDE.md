@@ -7,6 +7,46 @@ alwaysApply: true
 
 Standalone Isaac Sim Replicator data-generation package for visual servoing.
 
+## Project context: reference-prompted instance segmentation
+
+Four sibling repos — `vision_core`, `reference_matching`, `isaac_datagen`, `segmentation` — implement one
+system: **few-shot reference-prompted instance segmentation**. Given a single canonical reference image of
+a target object, segment that object in novel observation images; this is the perception front-end for
+visual servoing / robotic grasping.
+
+Inference is a three-stage pipeline, and the reference image conditions every stage:
+
+```
+reference image (one canonical shot per class)
+  ├─→ [reference_matching descriptors] DIFT tokens / M2F·DIFT FPN volumes — condition stages 2 and 3
+  ▼
+observation image
+  │ 1. propose  [reference_matching]  ALIKED/LightGlue or GIM ref↔obs matching → candidate (x,y)
+  │             point prompts on the observation (>50% outliers)
+  │ 2. verify   [segmentation/verifier — in progress]  point descriptors grid_sampled from FPN volumes
+  │             cross-attend a global reference representation → per-point inlier logits. Learned
+  │             replacement for RANSAC/MAGSAC: correspondence is an expedient to get anchor-box-like
+  │             candidates, so this is anchor-box classification ("does this point lie on an instance
+  │             of the reference's class?"), not match verification — no 2-view geometry downstream.
+  │ 3. segment  [segmentation]  verified points → SAM prompt_encoder (SAM is brittle to outlier
+  │             prompts — hence stage 2); reference features injected into the frozen image encoder
+  │             via GLIGEN/Flamingo-style tanh-gated cross-attention (GligenWrapper)
+  ▼
+instance mask of the target object
+```
+
+How the repos fit:
+
+| Repo | Role in the system |
+|---|---|
+| `vision_core` | Shared library: the serializable sample datastructs that are the dataset contract between repos (`ObsMask`/`ObsMaskMetadata` → `PreReferenceSegSample` → `ImageInlierSample`; `ReferenceSegSample`; `StereoSample`) plus mask/pose/viz/transform/config utilities. |
+| `reference_matching` | Stage-1 proposers plus the descriptor backbones for stages 2 and 3 (`M2FFpn`/`DiftFpn` volumes the verifier samples; `DiftDescriptor` tokens the gligen blocks consume). Library-only editable dep of both pipeline repos. |
+| `isaac_datagen` **(this repo)** | Isaac Sim Replicator synthetic data generation: renders the phased datasets that train both learned stages — `ImageInlierSample` (phase-2 proposals + phase-3 union-mask inlier labels: a point on ANY same-class instance is an inlier) for the verifier, `ReferenceSegSample` for the SAM fine-tune. Hosts the verifier design pseudocode (`verifier`) and its design note (`.docs_claude/multiscale-point-descriptor.md`). |
+| `segmentation` | Stage-3 training/eval: `GligenWrapper` installs gated cross-attention on a frozen point-prompted SAM; hermetic Lightning checkpoints. Also hosts the stage-2 verifier implementation (`segmentation/verifier/`). |
+
+Both learned stages (2 and 3) train from the same render dirs and condition on the same per-class
+reference descriptors (`ObsMaskMetadata.class_to_descriptors`).
+
 ## Quick start
 
 ```
