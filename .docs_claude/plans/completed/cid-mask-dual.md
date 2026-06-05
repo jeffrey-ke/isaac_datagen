@@ -227,8 +227,11 @@ num_targets=1 num_frames=4`):
 1. `isaac-datagen-proposals` ImportError: the pinned detectron2 wheel ships a top-level
    `tools/` package (its training scripts) in site-packages, shadowing gim's flat-layout
    `tools` module (`.pth` paths resolve AFTER site-packages). Workaround used:
-   `PYTHONPATH=/home/jeffk/repo/gim uv run isaac-datagen-proposals …`. Durable fix TBD
-   (e.g. import gim's tools by explicit path in reference_matching/proposal.py).
+   `PYTHONPATH=/home/jeffk/repo/gim uv run isaac-datagen-proposals …`. **Fixed
+   (2026-06-05):** `reference_matching/proposal.py` loads gim's `tools/__init__.py` by
+   explicit file path via gim's `direct_url.json` install metadata, and gim's
+   `networks/` (the only other gim code on our runtime path) never imports `tools` —
+   verified end-to-end without PYTHONPATH.
 2. The login shell exports a PYTHONPATH containing isaacsim's `pip_prebundle`, which
    shadows segmentation-train's venv torch (2.7.0 vs expected) and breaks
    xformers/diffusers imports there. Workaround: `env -u PYTHONPATH uv run …`.
