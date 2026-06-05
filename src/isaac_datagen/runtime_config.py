@@ -49,6 +49,15 @@ class RuntimeConfig:
     # kept if its best-visible member passes; NaN (unknown) never passes.
     proposer_max_occlusion: float = 0.10
 
+    # Phase-2 frame window (contiguous sharding): process frames
+    # [start_frame, end_frame); end_frame=None → through the last frame.
+    start_frame: int = 0
+    end_frame: int | None = None
+
+    # run_pipeline only: >1 device → one phase-2 subprocess per device, splitting
+    # the frame window contiguously. None/1 device → single proposer run.
+    proposer_devices: tuple[str, ...] | None = None
+
     # RTX render cost / VRAM tuning (consumed by boot_sim). Defaults preserve the
     # prior hardcoded behavior; lower these to trade render quality/speed for VRAM.
     #
@@ -75,6 +84,8 @@ class RuntimeConfig:
     def __post_init__(self):
         assert (self.num_frames is None) ^ (self.grid_dims is None), \
             "exactly one of num_frames / grid_dims must be set"
+        assert self.start_frame >= 0 and (self.end_frame is None or self.end_frame > self.start_frame), \
+            f"bad frame window [{self.start_frame}, {self.end_frame})"
         assert Path(self.dataset_dir).exists(), f"dataset_dir missing: {self.dataset_dir}"
         assert Path(self.intrinsics_path).exists(), f"intrinsics_path missing: {self.intrinsics_path}"
         assert Path(self.proposer_config_path).exists(), f"proposer_config_path missing: {self.proposer_config_path}"

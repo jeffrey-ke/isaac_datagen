@@ -10,6 +10,11 @@ existing render dir via
 ``PreReferenceSegSample.serialize(idx, dir, only={"proposals"})`` — so ``obs/``
 and ``cid_mask/`` are never rewritten.
 
+Resumable: frames whose ``proposals/proposals_NNNN.pt`` already exists are skipped
+(writes are atomic, so an existing file is complete); delete files to force redo.
+``start_frame``/``end_frame`` restrict the pass to a contiguous frame window so
+parallel invocations (e.g. one per GPU via run_pipeline) can shard one render dir.
+
 Usage (mirrors clean_datagen):
     isaac-datagen-proposals <config.yaml> [key=value ...]
 The render dir is ``{dataset_dir}/render{idx:03d}`` and the proposer is built from
@@ -35,16 +40,36 @@ def main():
 
     md = ObsMaskMetadata.deserialize(0, render_dir)
 
+    # Glob the real frame files (not iterdir) so a stray tmp dotfile from a
+    # hard-killed phase-1 run can't inflate the count.
+    n_frames = len(list((render_dir / "obs").glob("obs_*.png")))
+    start = runtime.start_frame
+    end = n_frames if runtime.end_frame is None else min(runtime.end_frame, n_frames)
+    assert start < end, f"empty frame window [{start}, {end}) of {n_frames} frames"
+    # Resume: a proposals file that exists is complete (serialize is atomic),
+    # so skip it. Delete proposals/NNNN.pt (or the whole subdir) to force redo.
+    prop_ext = PreReferenceSegSample._get_serializer(dict)[0]   # ".pt"
+    done = {idx for idx in range(start, end)
+            if (render_dir / "proposals" / f"proposals_{idx:04d}{prop_ext}").exists()}
+    if done:
+        print(f"resume: {len(done)}/{end - start} frames in [{start}, {end}) already have proposals — skipping",
+              flush=True)
+    if len(done) == end - start:
+        print(f"done: 0 new + {len(done)} skipped frames in [{start}, {end}) → {render_dir / 'proposals'}",
+              flush=True)
+        return
+
     from reference_matching import proposal as proposal_module
     device = runtime.proposer_device
     print(f"loading proposer from {runtime.proposer_config_path} on {device} …", flush=True)
     proposer = proposal_module.from_config(runtime.proposer_config_path).to(device)
     on_cuda = torch.device(device).type == "cuda"
 
-    n_frames = len(list((render_dir / "obs").iterdir()))
     total_pts = 0
-    bar = tqdm(range(n_frames), desc=render_dir.name, unit="frame")
+    bar = tqdm(range(start, end), desc=f"{render_dir.name}[{start}:{end}]", unit="frame")
     for idx in bar:
+        if idx in done:
+            continue
         om = ObsMask.deserialize(idx, render_dir)
         present_iids = {int(i) for i in om.iid_mask.unique().tolist()} & set(md.iid_to_name)
         # Occlusion gate (iid space, then join iid → name → class): a class is kept
@@ -81,7 +106,8 @@ def main():
             postfix["vram"] = f"{torch.cuda.max_memory_allocated(device) / 1e9:.1f}G"
         bar.set_postfix(postfix)
 
-    print(f"done: {n_frames} frames, {total_pts} proposal points → {render_dir / 'proposals'}", flush=True)
+    print(f"done: {end - start - len(done)} new + {len(done)} skipped frames in [{start}, {end}), "
+          f"{total_pts} new proposal points → {render_dir / 'proposals'}", flush=True)
 
 
 if __name__ == "__main__":
