@@ -122,8 +122,8 @@ class ObsMaskWriter(Writer):
         descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
         with torch.inference_mode():
             self.class_to_descriptors = {
-                cls: descriptor(tv_rgba.unsqueeze(0).to(descriptor_device)).squeeze().cpu()
-                for cls, tv_rgba in self.class_to_ref.items()
+                cls: descriptor(tv_rgba.unsqueeze(0).to(descriptor_device)).squeeze(0).cpu()
+                for cls, tv_rgba in self.class_to_ref.items()   # (C, h, w) spatial
             }
         del descriptor
 
