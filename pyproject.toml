@@ -22,6 +22,7 @@ dependencies = [
     "pyyaml>=6.0",
     "vision-core",
     "reference-matching",
+    "fpsample<1",
 ]
 
 [project.scripts]
@@ -30,6 +31,8 @@ isaac-datagen = "isaac_datagen.clean_datagen:reference_segmentation"
 isaac-datagen-stereo = "isaac_datagen.clean_datagen:main"
 # phase-2 (no Isaac): add proposer point-prompts onto a rendered ObsMask dataset.
 isaac-datagen-proposals = "isaac_datagen.add_proposals:main"
+# phase-2.5 (no Isaac): FPS-cap each class's proposals; run before inliers.
+isaac-datagen-downsample-proposals = "isaac_datagen.downsample_proposals:main"
 # phase-3 (no Isaac): label each proposal inlier/outlier for verifier training.
 isaac-datagen-inliers = "isaac_datagen.add_inlier_data:main"
 # all three phases as one command (each phase its own subprocess; re-runnable).
