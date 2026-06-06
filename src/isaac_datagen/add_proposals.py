@@ -92,10 +92,14 @@ def main():
                 ref_b = md.class_to_ref[name].unsqueeze(0).to(device)
                 # proposer returns list[(xy (M,2), scores (M,))] per batch element
                 xy, _scores = proposer(obs_b, ref_b)[0]
+                # A class that passes the occlusion gate but yields no matches is
+                # not a trainable (frame, class) sample — SAM needs ≥1 point prompt.
+                # Drop it so a dict key always means "gate-passed AND matched".
+                if xy.shape[0] == 0:
+                    tqdm.write(f"  frame {idx:04d}: '{name}' returned 0 proposal points — dropping")
+                    continue
                 proposals[name] = xy.cpu()
                 frame_pts += int(xy.shape[0])
-                if xy.shape[0] == 0:
-                    tqdm.write(f"  frame {idx:04d}: '{name}' returned 0 proposal points")
 
         PreReferenceSegSample(obs=om.obs, cid_mask=om.cid_mask, proposals=proposals) \
             .serialize(idx, render_dir, only={"proposals"})
