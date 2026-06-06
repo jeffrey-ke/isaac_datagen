@@ -72,9 +72,15 @@ observation (B,C,H,W)   proposals (B,N,2) + valid (B,N)        reference image
 ```
 forward(image, proposals, proposals_valid) -> (B, N, hidden_dim)
   image:           tv_tensors.Image (B, C, H, W), raw / un-prepped
-  proposals:       (B, N, 2) xy pixel coords in ORIGINAL image space
+  proposals:       (B, N, 2) xy as 0-1 cell-center NORMALIZED coords — the CALLER
+                   normalizes once, (xy_px + 0.5) / [W, H]; out-of-range raises ValueError
   proposals_valid: (B, N) bool; padded rows hold harmless values like 0
 ```
+
+> Contract changed with the Verifier implementation (2026-06-05): the Verifier is the single
+> normalization site — the same `xy01` tensor feeds this read-out and the coordinate posenc.
+> The module converts to `grid_sample`'s [-1, 1] internally (mechanism identity) and raises
+> on un-normalized input instead of silently border-sampling.
 
 FPN provider contract consumed (`reference_matching/src/reference_matching/descriptor.py`):
 `.channels` (dict key→width), `.keys` (tuple, fixes volume order), `.strides`, `.prep`
@@ -83,8 +89,9 @@ frozen / `@torch.no_grad()`. Note the attribute is `channels` — the pseudocode
 does not exist.
 
 Coordinate convention: `grid_sample` with `align_corners=False`, cell-center normalization
-`x_norm = (x + 0.5)/W·2 − 1`, computed **once against the original image dims** — valid at every
-scale because `prep` square-resizes with no pad/crop (convention established in
+`x_norm = (x + 0.5)/W·2 − 1` — the 0-1 half (`(x + 0.5)/W`) now lives at the caller (Verifier),
+the `·2 − 1` half inside the module; still computed **once against the original image dims** and
+valid at every scale because `prep` square-resizes with no pad/crop (convention established in
 `reference_matching/tests/smoke_fpn_descriptor.py:51-68`).
 
 ## Resolved design questions
