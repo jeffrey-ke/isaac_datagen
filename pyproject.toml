@@ -37,8 +37,12 @@ isaac-datagen-downsample-proposals = "isaac_datagen.downsample_proposals:main"
 isaac-datagen-inliers = "isaac_datagen.add_inlier_data:main"
 # all three phases as one command (each phase its own subprocess; re-runnable).
 isaac-datagen-pipeline = "isaac_datagen.run_pipeline:main"
+# debug (opt-in): dry-run export (scene.usdz + planned poses) -> Blender orbit + pose-sanity renders.
+isaac-datagen-debug-render = "isaac_datagen.debug_render:main"
 # viz (no Isaac): sanity-check the inlier/outlier labels on a rendered dataset.
 isaac-datagen-viz-inliers = "isaac_datagen.viz_inliers:main"
+# tuning (no Isaac): sweep the coords_in_mask border-eps on one frame to pick MASK_BORDER_EPS.
+isaac-datagen-sweep-label-eps = "isaac_datagen.sweep_label_eps:main"
 # viz (no Isaac): spot-check ObsMask per-instance occlusion ratios on a random sample.
 isaac-datagen-viz-occlusion = "isaac_datagen.viz_occlusion:main"
 # viz (no Isaac): per-sample refs + all-proposals + per-class gt-mask panels.
