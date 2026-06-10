@@ -82,7 +82,7 @@ def main():
         extra = [f"proposer_device={devices[0]}"] if devices else []
         _run("isaac-datagen-proposals", *sys.argv[1:], *extra)
 
-    _run("isaac-datagen-inliers", str(render_dir))
+    _run("isaac-datagen-inliers", str(render_dir), "--eps", str(runtime.inlier_border_eps))
 
 
 if __name__ == "__main__":

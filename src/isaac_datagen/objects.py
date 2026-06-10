@@ -2,6 +2,7 @@
 
 import os
 import shutil
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from vision_core.datastructs import SerializableSample, ReferenceSegSample
 # isaacsim dependency — can import them too. Re-exported here for convenience.
 from vision_core.datastructs import ObsMask, PreReferenceSegSample, ObsMaskMetadata
 
-from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty
+from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty, local_bbox_range
 
 
 class UsdPath(str):
@@ -160,6 +161,7 @@ class OccupancyGrid:
         self.grid = np.ones(grid_dims, dtype=np.int8)
         self.object_bbox_dims = object_bbox_dims
         self._idx = 0
+        self._placed = {}  # prim_path -> (i, j, k), recorded as __call__ drives placement
 
     def is_occupied(self, i, j, k):
         return bool(self.grid[i, j, k])
@@ -218,7 +220,91 @@ class OccupancyGrid:
             )
         i, j, k = coords[self._idx]
         self._idx += 1
+        self._placed[prim_path] = (i, j, k)
         return self.slot_position(i, j, k), (0.0, 0.0, 0.0)
+
+    def graspability(self):
+        """Per-prim-path graspability: is_front AND is_top for each placed slot.
+
+        Meaningful only after every slot has been driven via __call__ (the
+        full-wall contract). Folds in what the caller used to compute inline."""
+        return {
+            path: (self.is_front(*coord) and self.is_top(*coord))
+            for path, coord in self._placed.items()
+        }
+
+
+class UntilExhaustedStacker:
+    """Until-exhausted column stacker for HETEROGENEOUS object bounding boxes.
+
+    Chunks prim_paths into columns of <= column_height; each column stacks its
+    members base-to-base (bottom seated on the ground, each next object's base on
+    the previous object's top), centroids aligned on the column center-line and on
+    y=0. Column footprint width = the widest member's x-extent; columns abut
+    left->right with EPSILON gaps; the whole wall is centered on x=0. No physics
+    (a wider object may overhang a narrower one below). The last column may be
+    partial.
+
+    Unlike OccupancyGrid this MEASURES each loaded prim's bbox size AND center and
+    corrects for prim-origin-!=-bbox-center. The full layout is precomputed in
+    __init__; __call__ is a lookup.
+
+    Graspability: only the top (last-stacked) object of each column.
+    """
+
+    EPSILON = 0.002
+
+    def __init__(self, prim_paths, column_height):
+        if column_height < 1:
+            raise ValueError(f"column_height must be >= 1, got {column_height}")
+        if len(prim_paths) < 1:
+            raise ValueError("UntilExhaustedStacker needs >= 1 object")
+
+        from isaacsim.core.utils.stage import get_current_stage
+        stage = get_current_stage()
+
+        # Columns of prim paths (deques so the "top" is unambiguous: last pushed).
+        self.columns = [
+            deque(prim_paths[s:s + column_height])
+            for s in range(0, len(prim_paths), column_height)
+        ]
+
+        # Measure size + center per prim once, from the loaded stage prims.
+        size, center = {}, {}
+        for p in prim_paths:
+            rng = local_bbox_range(stage.GetPrimAtPath(p))
+            sz, mid = rng.GetSize(), rng.GetMidpoint()
+            size[p] = (sz[0], sz[1], sz[2])
+            center[p] = (mid[0], mid[1], mid[2])
+
+        # Column footprint width = widest member's x-extent; center the wall on x=0.
+        col_widths = [max(size[p][0] for p in col) for col in self.columns]
+        total_w = sum(col_widths) + (len(self.columns) - 1) * self.EPSILON
+        left_edge = -total_w / 2.0
+
+        self._placements = {}  # prim_path -> (translation, rotation)
+        for col, col_w in zip(self.columns, col_widths):
+            col_x = left_edge + col_w / 2.0
+            floor_z = 0.0
+            for p in col:  # bottom -> top
+                sx, sy, sz = size[p]
+                cx, cy, cz = center[p]
+                # set_transform places the prim ORIGIN; the bbox center lands at
+                # origin + (cx,cy,cz), so subtract the midpoint per axis to seat
+                # the centroid on (col_x, 0) and the bbox base at floor_z.
+                translation = (col_x - cx, -cy, floor_z - cz + sz / 2.0)
+                self._placements[p] = (translation, (0.0, 0.0, 0.0))
+                floor_z += sz + self.EPSILON
+            left_edge += col_w + self.EPSILON
+
+    def __call__(self, prim_path):
+        return self._placements[prim_path]
+
+    def graspability(self):
+        """Per-prim-path graspability: only the top object of each column."""
+        tops = {col[-1] for col in self.columns if col}
+        return {p: (p in tops) for p in self._placements}
+
 
 class LoadedPallet:
     """A pallet loaded with boxes.

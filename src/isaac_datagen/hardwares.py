@@ -18,6 +18,10 @@ class ZedMini:
     """
     BASELINE = 0.063  # 63 mm
     FOCAL_LENGTH_MM = 2.8  # arbitrary, only the ratio to sensor_width matters
+    # Per-camera translation on the rig — the single source of truth for both the
+    # real rig geometry (placed in __init__) and the dry-run debug offset (left2rig).
+    LEFT_CAM_OFFSET = (-BASELINE * 0.5, 0.0, 0.0)
+    RIGHT_CAM_OFFSET = (BASELINE * 0.5, 0.0, 0.0)
 
     def __init__(self, name, parent_path, intrinsics, width=1920, height=1080):
         self.name = name
@@ -32,14 +36,14 @@ class ZedMini:
         self.left_camera = self._create_camera(f"{name}_left", self.left_camera_path)
         set_transform(
             self.left_camera,
-            translation=(-self.BASELINE * 0.5, 0.0, 0.0),
+            translation=self.LEFT_CAM_OFFSET,
         )
 
         self.right_camera_path = f"{self.prim_path}/{name}_right"
         self.right_camera = self._create_camera(f"{name}_right", self.right_camera_path)
         set_transform(
             self.right_camera,
-            translation=(self.BASELINE * 0.5, 0.0, 0.0),
+            translation=self.RIGHT_CAM_OFFSET,
         )
 
         self.left_rp = setup_render_product(
@@ -52,6 +56,19 @@ class ZedMini:
     @property
     def rps(self):
         return (self.left_rp, self.right_rp)
+
+    @property
+    def intrinsics(self) -> np.ndarray:
+        """The 3x3 OpenCV K this rig was built with (no disk reload needed)."""
+        return self._intrinsics
+
+    @property
+    def left2rig(self) -> np.ndarray:
+        """SE3 of the left (dataset) camera relative to the moved rig — the
+        transform that maps a rig world pose to the camera whose RGB the dataset uses."""
+        T = np.eye(4)
+        T[:3, 3] = self.LEFT_CAM_OFFSET
+        return T
 
     def _create_camera(self, name, prim_path):
         return setup_camera(

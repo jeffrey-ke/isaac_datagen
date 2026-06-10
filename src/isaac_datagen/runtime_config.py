@@ -37,6 +37,10 @@ class RuntimeConfig:
     pallet_dims: tuple[int, int, int]
     dome_light: bool
 
+    # Phase-3 inliers: a proposal counts as an inlier only if it lies ≥ this many px
+    # inside its class union mask (border margin; see vision_core.mask_utils.coords_in_mask).
+    inlier_border_eps: float
+
     num_frames: int | None = None
     grid_dims: tuple[int, int, int] | None = None
 
@@ -44,6 +48,18 @@ class RuntimeConfig:
     seed: int = 1
     width: int = 1920
     height: int = 1080
+
+    # Dry run (dotlist: dry_run=true): build the scene and plan poses exactly as the
+    # real run, then export scene.usdz + baked debug cameras/grasp-axes and the planned
+    # poses for offline (Blender) inspection — skipping the writer and RTX capture.
+    dry_run: bool = False
+
+    # Object placement policy: "occupancy_grid" (static full-wall, uniform boxes,
+    # requires exactly prod(pallet_dims) objects) or "until_exhausted_stacker"
+    # (heterogeneous bboxes, columns of <= column_height, requires >= 1 object).
+    placement: str = "occupancy_grid"
+    # until_exhausted_stacker only: max objects per vertical column.
+    column_height: int = 5
 
     # Phase-2 proposals: skip objects whose occlusion ratio is ≥ this. A class is
     # kept if its best-visible member passes; NaN (unknown) never passes.
@@ -86,6 +102,10 @@ class RuntimeConfig:
             "exactly one of num_frames / grid_dims must be set"
         assert self.start_frame >= 0 and (self.end_frame is None or self.end_frame > self.start_frame), \
             f"bad frame window [{self.start_frame}, {self.end_frame})"
+        assert self.inlier_border_eps >= 0, f"inlier_border_eps must be ≥ 0: {self.inlier_border_eps}"
+        assert self.placement in ("occupancy_grid", "until_exhausted_stacker"), \
+            f"unknown placement policy: {self.placement!r}"
+        assert self.column_height >= 1, f"column_height must be >= 1: {self.column_height}"
         assert Path(self.dataset_dir).exists(), f"dataset_dir missing: {self.dataset_dir}"
         assert Path(self.intrinsics_path).exists(), f"intrinsics_path missing: {self.intrinsics_path}"
         assert Path(self.proposer_config_path).exists(), f"proposer_config_path missing: {self.proposer_config_path}"

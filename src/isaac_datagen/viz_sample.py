@@ -1,7 +1,7 @@
-"""Per-sample viz for ImageInlierSample — per-class proposals and gt masks.
+"""Per-sample viz for PreImageInlierSample — per-class proposals and gt masks.
 
 Convenience compositions of ``vision_core.viz`` primitives (same parts as
-viz_inliers, different composition). An ImageInlierSample maps class name →
+viz_inliers, different composition). An PreImageInlierSample maps class name →
 proposals and class name → labels; for each selected frame, one figure:
 
   panels 0..N-1   — per class: obs with THAT class's proposals scattered,
@@ -25,7 +25,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from vision_core.datastructs import ImageInlierSample, ObsMaskMetadata, count_samples
+from vision_core.datastructs import PreImageInlierSample, ObsMaskMetadata, count_samples
 from vision_core.viz import (add_thumbnail, assign_colors, overlay_id_masks, panel_grid,
                              rgba_chw_to_rgb, save_figure, scatter_labeled)
 from isaac_datagen.viz_inliers import select_frames
@@ -51,7 +51,7 @@ def class_mask_panel(ax, obs_rgb, cid_mask_np, cid, cls, color, alpha=0.45):
 
 
 def sample_figure(sample, md, *, cols=4, max_points=None, alpha=0.45, title=None):
-    """ImageInlierSample → Figure: one proposals panel (with ref thumbnail) per
+    """PreImageInlierSample → Figure: one proposals panel (with ref thumbnail) per
     class in ``sample.proposals``, then one gt union-mask panel per class.
     Returns None if the sample has no proposals."""
     obs_rgb = rgba_chw_to_rgb(sample.obs)
@@ -84,7 +84,7 @@ def sample_figure(sample, md, *, cols=4, max_points=None, alpha=0.45, title=None
 # ── Entry point ─────────────────────────────────────────────────────────────────
 
 def main():
-    p = argparse.ArgumentParser(description="Per-class proposals/gt-masks viz for ImageInlierSample.")
+    p = argparse.ArgumentParser(description="Per-class proposals/gt-masks viz for PreImageInlierSample.")
     p.add_argument("render_dir", type=Path)
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--frames", type=str, default=None, help="comma-separated frame indices")
@@ -113,7 +113,7 @@ def main():
         if idx >= n_frames:
             print(f"  frame {idx}: out of range (n_frames={n_frames}) — skipping")
             continue
-        sample = ImageInlierSample.deserialize(idx, render_dir)
+        sample = PreImageInlierSample.deserialize(idx, render_dir)
         fig = sample_figure(sample, md, cols=args.cols, max_points=args.max_points,
                             alpha=args.alpha, title=f"{render_dir.name}  frame {idx:04d}")
         if fig is None:

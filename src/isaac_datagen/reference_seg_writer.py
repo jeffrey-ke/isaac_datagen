@@ -25,6 +25,7 @@ from torchvision import tv_tensors
 from omni.replicator.core import AnnotatorRegistry, Writer
 
 from vision_core.datastructs import ObsMask, ObsMaskMetadata
+from vision_core.viz import fit_pca_basis
 
 
 def _pil_to_tv_rgba(pil_img: PILImage.Image) -> tv_tensors.Image:
@@ -182,10 +183,17 @@ class ObsMaskWriter(Writer):
     def finalize_metadata(self, directory: str | Path | None = None):
         """Serialize the per-render-dir catalog once (at idx=0). Call after capture."""
         directory = Path(directory) if directory is not None else self._render_dir
+        # Shared PCA→RGB basis over ALL classes' tokens (each (C,h,w) → (h*w, C),
+        # stacked — the same flatten(1).T tokenization consumers read), so every
+        # class projects into comparable colors. Mandatory ObsMaskMetadata field.
+        tokens = torch.cat(
+            [d.flatten(1).T for d in self.class_to_descriptors.values()], dim=0
+        )
         ObsMaskMetadata(
             iid_to_name=self.iid_to_name,
             cid_to_class=self.cid_to_class,
             name_to_class=self.name_to_class,
             class_to_ref=self.class_to_ref,
             class_to_descriptors=self.class_to_descriptors,
+            principal_components=fit_pca_basis(tokens, n=3),
         ).serialize(0, directory)

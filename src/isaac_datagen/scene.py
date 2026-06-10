@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation as R
 
 from isaac_datagen.isaac_utils import load_asset, set_transform, bounding_half_extents, find_prims, create_empty
 from isaac_datagen.hardwares import ZedMini
-from isaac_datagen.objects import OccupancyGrid, GraspableObject
+from isaac_datagen.objects import OccupancyGrid, UntilExhaustedStacker, GraspableObject
 from isaac_datagen.pose_planning import plan_poses
 
 
@@ -55,31 +55,39 @@ def organize_objects(policy: Callable, prim_paths: List[str]):
         set_transform(stage.GetPrimAtPath(prim_path), translation=translation, rotation=rotation)
 
 
-def create_stack_of_objects(parent_path, objects: List[GraspableObject], dims: tuple[int, int, int]):
+def create_stack_of_objects(parent_path, objects: List[GraspableObject], runtime):
     from isaacsim.core.utils.prims import create_prim
     stack_prim = create_prim(f"{parent_path}/stack", "Xform")
     stack_path = stack_prim.GetPath().pathString
 
-    # OccupancyGrid here is a STATIC FULL-WALL policy: the grid is all-ones, so
-    # every slot must receive a box -- otherwise is_top/is_graspable describe
-    # phantom boxes that were never placed. Enforce that the caller supplies
-    # enough objects to fill the wall.
-    capacity = dims[0] * dims[1] * dims[2]
-    if len(objects) < capacity:
-        raise ValueError(
-            f"create_stack_of_objects: full-wall pallet {tuple(dims)} needs {capacity} "
-            f"objects, got {len(objects)}. Supply more objects or shrink pallet_dims."
-        )
-    prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects[:capacity]]
+    if runtime.placement == "occupancy_grid":
+        # STATIC FULL-WALL policy: the grid is all-ones, so every slot must
+        # receive a box -- otherwise is_top/is_graspable describe phantom boxes
+        # that were never placed. Enforce enough objects to fill the wall.
+        dims = runtime.pallet_dims
+        capacity = dims[0] * dims[1] * dims[2]
+        if len(objects) < capacity:
+            raise ValueError(
+                f"create_stack_of_objects: full-wall pallet {tuple(dims)} needs {capacity} "
+                f"objects, got {len(objects)}. Supply more objects or shrink pallet_dims."
+            )
+        prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects[:capacity]]
+        # Uniform-box policy: cell size taken from the first object's bbox.
+        policy = OccupancyGrid(dims, bbox_size_of(prim_paths_added[0]))
 
-    occupancy_grid_placer = OccupancyGrid(dims, bbox_size_of(prim_paths_added[0]))
-    organize_objects(policy=occupancy_grid_placer, prim_paths=prim_paths_added)
+    elif runtime.placement == "until_exhausted_stacker":
+        # Heterogeneous policy: places ALL objects in columns of <= column_height.
+        if len(objects) < 1:
+            raise ValueError("until_exhausted_stacker needs >= 1 object")
+        prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects]
+        # Built AFTER add_object so it can measure each prim's bbox from the stage.
+        policy = UntilExhaustedStacker(prim_paths_added, runtime.column_height)
 
-    is_graspable = {
-            path : (occupancy_grid_placer.is_front(*coord) and occupancy_grid_placer.is_top(*coord))
-            for path, coord in zip(prim_paths_added, occupancy_grid_placer.sequence)
-    }
+    else:
+        raise ValueError(f"unknown placement policy: {runtime.placement!r}")
 
+    organize_objects(policy=policy, prim_paths=prim_paths_added)
+    is_graspable = policy.graspability()
     return stack_path, prim_paths_added, is_graspable
 
 def collect_shader_paths(stack_path):
@@ -261,10 +269,20 @@ def boot_sim(runtime, render_dir):
 
 def add_grasp_frame(box_path):
     from isaacsim.core.utils.stage import get_current_stage
+    from pxr import Usd, UsdGeom
     box_prim = get_current_stage().GetPrimAtPath(box_path)
+    # Bottom-front edge of the bbox in the prim's OWN local frame. Use
+    # ComputeUntransformedBound, NOT ComputeLocalBound/local_bbox_range: grasp
+    # frames are added AFTER the wrapper is slotted, and ComputeLocalBound bakes
+    # that placement into the midpoint — doubling the offset and flinging the
+    # grasp frame (and the camera tied to it) off the object. Untransformed bound
+    # ignores the prim's own placement, so the offset is purely geometric (and a
+    # no-op for centered boxes — origin == bbox center).
+    bb = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    cx, cy, cz = bb.ComputeUntransformedBound(box_prim).ComputeAlignedRange().GetMidpoint()
     half = bounding_half_extents(box_prim)
     grasp = create_empty("GraspPoint", box_path)
-    set_transform(grasp, translation=(0.0, -half[1], -half[2]), rotation=(0.0, 0.0, -90.0))
+    set_transform(grasp, translation=(cx, cy - half[1], cz - half[2]), rotation=(0.0, 0.0, -90.0))
     return grasp.GetPath().pathString
 
 def build_scene(runtime, objects: List[GraspableObject], rng):
@@ -294,7 +312,7 @@ def build_scene(runtime, objects: List[GraspableObject], rng):
     stack_path, objects_paths, is_graspable = create_stack_of_objects(
         parent_path,
         objects,
-        runtime.pallet_dims,
+        runtime,
     )
 
     graspable_paths = [p for p, v in is_graspable.items() if v]

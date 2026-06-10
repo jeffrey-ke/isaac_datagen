@@ -32,6 +32,54 @@ def get_target2world(target_paths):
     return np.stack(poses)
 
 
+def plan_capture(runtime, scene, rng):
+    """Pick per-target grasp frames and the world camera poses.
+
+    THE single computation both the real render (reference_segmentation) and the
+    dry-run debug export depend on, so the two can never drift apart.
+
+    Returns:
+        (idx, grasp_points, world_poses): the chosen grasp-point indices, their
+        prim paths, and the (B*N, 4, 4) world camera poses (targets × planned poses).
+    """
+    idx = rng.choice(len(scene.grasp_points), size=runtime.num_targets)
+    grasp_points = [scene.grasp_points[i] for i in idx]
+    target2worlds = get_target2world(grasp_points)                       # (B, 4, 4)
+    target_frame_poses = plan_poses(                                     # (N, 4, 4)
+        runtime.target_to_baseline_ypr_desired,
+        runtime.xrange, runtime.yrange, runtime.zrange, runtime.sampling,
+    )
+    # (B, N, 4, 4) -> (B*N, 4, 4): flatten target and pose dims into one batch.
+    world_poses = np.einsum('bij,njk->bnik', target2worlds, target_frame_poses).reshape(-1, 4, 4)
+    return idx, grasp_points, world_poses
+
+
+def se3_to_pos_euler(pose):
+    """SE3 -> (translation, euler_xyz_deg).
+
+    THE single SE3 decomposition. move_prims feeds this to rep.modify.pose for the
+    live capture; the dry-run baker feeds it to set_transform. Sharing it (rather
+    than the application call, which differs) is what keeps the baked debug cameras
+    landing exactly where the rendered cameras would.
+    """
+    return (pose[:3, 3].tolist(),
+            R.from_matrix(pose[:3, :3]).as_euler('xyz', degrees=True).tolist())
+
+
+def set_prim_pose(prim_path, pose):
+    """Author an SE3 world pose onto the prim at `prim_path`.
+
+    Prim-path-string addressed; consistent with move_prims by construction —
+    set_transform authors the same USD ops (xformOp:translate + xformOp:rotateXYZ)
+    that rep.modify.pose authors, fed the identical euler triple from se3_to_pos_euler.
+    """
+    from isaacsim.core.utils.stage import get_current_stage
+    from isaac_datagen.isaac_utils import set_transform
+    translation, rotation = se3_to_pos_euler(pose)
+    set_transform(get_current_stage().GetPrimAtPath(prim_path),
+                  translation=translation, rotation=rotation)
+
+
 def broadcast(a: Sequence, b: Sequence):
     """Numpy-style elementwise pairing with length-1 broadcasting."""
     if len(a) == 0 or len(b) == 0:
@@ -80,15 +128,11 @@ def capture_session(writers, cameras, n_frames, replicator, rt_subframes=4):
 def move_prims(prims, pose_sequences, replicator):
     rep = replicator.rep
     for prim, poses in broadcast(prims, pose_sequences):
-        positions = [p[:3, 3].tolist() for p in poses]
-        rotations = [
-            R.from_matrix(p[:3, :3]).as_euler('xyz', degrees=True).tolist()
-            for p in poses
-        ]
+        positions, rotations = zip(*(se3_to_pos_euler(p) for p in poses))
         with prim:
             rep.modify.pose(
-                position=rep.distribution.sequence(positions),
-                rotation=rep.distribution.sequence(rotations),
+                position=rep.distribution.sequence(list(positions)),
+                rotation=rep.distribution.sequence(list(rotations)),
             )
 
 

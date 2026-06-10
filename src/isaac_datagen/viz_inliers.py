@@ -1,7 +1,7 @@
-"""Visualize ImageInlierSample inlier/outlier labels — a sanity check for phase-3.
+"""Visualize PreImageInlierSample inlier/outlier labels — a sanity check for phase-3.
 
 Thin CLI over ``vision_core.viz``: per selected frame, deserialize the
-ImageInlierSample, build the inlier figure (overview panel of all class union
+PreImageInlierSample, build the inlier figure (overview panel of all class union
 masks + one proposal panel per class — green = inlier / red = outlier, union
 outline, canonical-ref thumbnail), and save it. All rendering primitives live
 in ``vision_core.viz`` (see ``inlier_figure`` and the leaves it composes).
@@ -19,7 +19,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from vision_core.datastructs import ImageInlierSample, ObsMaskMetadata, count_samples
+from vision_core.datastructs import PreImageInlierSample, ObsMaskMetadata, count_samples
 from vision_core.viz import inlier_figure, save_figure
 
 
@@ -31,7 +31,7 @@ def select_frames(n_frames, explicit, stride, max_frames):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Visualize ImageInlierSample inlier/outlier labels.")
+    p = argparse.ArgumentParser(description="Visualize PreImageInlierSample inlier/outlier labels.")
     p.add_argument("render_dir", type=Path)
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--frames", type=str, default=None, help="comma-separated frame indices")
@@ -59,7 +59,7 @@ def main():
         if idx >= n_frames:
             print(f"  frame {idx}: out of range (n_frames={n_frames}) — skipping")
             continue
-        sample = ImageInlierSample.deserialize(idx, render_dir)
+        sample = PreImageInlierSample.deserialize(idx, render_dir)
         fig = inlier_figure(sample, md, cols=args.cols, max_points=args.max_points,
                             title=f"{render_dir.name}  frame {idx:04d}")
         if fig is None:
