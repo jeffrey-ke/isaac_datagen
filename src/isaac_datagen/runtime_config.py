@@ -9,7 +9,7 @@ at load time.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 import os
@@ -93,6 +93,11 @@ class RuntimeConfig:
     yrange: tuple[float, float] = (-0.22, 0.22)
     zrange: tuple[float, float] = (0.01, 0.01)
     target_to_baseline_ypr_desired: tuple[float, float, float] = (90, 0, 90)
+
+    # Pose-generation policy registry (posers.py): name a poser class, pass its
+    # ctor kwargs verbatim. Mirrors segmentation OptimConfig (name + args).
+    pose_generation_policy: str = "GridFixedPoser"
+    pose_generation_policy_args: dict = field(default_factory=dict)
 
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()

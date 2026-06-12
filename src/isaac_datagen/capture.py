@@ -8,7 +8,7 @@ from typing import Sequence
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from isaac_datagen.pose_planning import plan_poses
+from isaac_datagen import posers
 
 
 def get_target2world(target_paths):
@@ -45,10 +45,8 @@ def plan_capture(runtime, scene, rng):
     idx = rng.choice(len(scene.grasp_points), size=runtime.num_targets)
     grasp_points = [scene.grasp_points[i] for i in idx]
     target2worlds = get_target2world(grasp_points)                       # (B, 4, 4)
-    target_frame_poses = plan_poses(                                     # (N, 4, 4)
-        runtime.target_to_baseline_ypr_desired,
-        runtime.xrange, runtime.yrange, runtime.zrange, runtime.sampling,
-    )
+    poser = posers.get(runtime.pose_generation_policy)(**runtime.pose_generation_policy_args)
+    target_frame_poses = poser(runtime.num_frames)                       # (N, 4, 4)
     # (B, N, 4, 4) -> (B*N, 4, 4): flatten target and pose dims into one batch.
     world_poses = np.einsum('bij,njk->bnik', target2worlds, target_frame_poses).reshape(-1, 4, 4)
     return idx, grasp_points, world_poses
@@ -156,23 +154,3 @@ def capture_with_poses(world_poses, writer, camera, replicator):
         with rep.trigger.on_frame():
             move_prims([rig_node], [world_poses], replicator)
             replicator.apply_randomizers()
-
-
-def make_index(target_to_baseline_ypr_desired, xrange, yrange, zrange,
-               sampling, target_prim, zed, replicator, render_dir):
-    from isaac_datagen.stereo_writer import StereoSampleWriter
-
-    target_frame_poses = plan_poses(
-        target_to_baseline_ypr_desired, xrange, yrange, zrange, sampling
-    )
-    target2world = get_target2world(target_prim)
-    world_poses = target2world @ target_frame_poses
-    offsets = [pose[:3, 3].tolist() for pose in target_frame_poses]
-
-    stereo_writer = StereoSampleWriter(
-        output_dir=str(render_dir),
-        offsets=offsets,
-        target2world=target2world,
-    )
-
-    capture_with_poses(world_poses, stereo_writer, zed, replicator)

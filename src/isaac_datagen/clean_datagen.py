@@ -22,9 +22,10 @@ import numpy as np
 import yaml
 
 from isaac_datagen.scene import boot_sim, build_scene, make_replicator
-from isaac_datagen.capture import get_target2world, make_index, capture_with_poses, plan_capture
+from isaac_datagen.capture import get_target2world, capture_with_poses, plan_capture
 from isaac_datagen.runtime_config import load_config
 from isaac_datagen.objects import GraspableObject
+from isaac_datagen import posers
 
 
 def main():
@@ -46,11 +47,16 @@ def main():
     target2world = get_target2world(grasp_point)
     replicator = make_replicator(runtime, target2world)
 
-    make_index(
-        runtime.target_to_baseline_ypr_desired,
-        runtime.xrange, runtime.yrange, runtime.zrange,
-        runtime.sampling, grasp_point, scene.zed, replicator, render_dir,
-    )
+    from isaac_datagen.stereo_writer import StereoSampleWriter
+
+    poser = posers.get(runtime.pose_generation_policy)(**runtime.pose_generation_policy_args)
+    target_frame_poses = poser(runtime.num_frames)          # (N, 4, 4)
+    world_poses = target2world @ target_frame_poses
+    offsets = [pose[:3, 3].tolist() for pose in target_frame_poses]
+
+    stereo_writer = StereoSampleWriter(output_dir=str(render_dir),
+                                       offsets=offsets, target2world=target2world)
+    capture_with_poses(world_poses, stereo_writer, scene.zed, replicator)
 
     with open(render_dir / f'config{runtime.idx:03d}.json', 'w') as f:
         json.dump(asdict(runtime), f, indent=2)
