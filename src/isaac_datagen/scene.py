@@ -166,7 +166,7 @@ def register_dome_jitter(rep, replicator, prim_path):
     dome_node = rep.get.prim_at_path(prim_path)
     def jitter_dome():
         with dome_node:
-            rep.modify.attribute("intensity", rep.distribution.uniform(0, 1000))
+            rep.modify.attribute("intensity", rep.distribution.uniform(500, 1000))
         return dome_node.node
     replicator.register(jitter_dome)
 
