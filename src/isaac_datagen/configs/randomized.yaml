@@ -1,10 +1,10 @@
-idx: 1
+idx: 0
 num_targets: 5
 scene: empty
-dataset_dir: datasets/debug
+dataset_dir: datasets/perspective-refseg
 intrinsics_path: zed_K.npy
 pallet_dims: [11,1,4]
-num_frames: 5
+num_frames: 50
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True

@@ -107,9 +107,15 @@ class RuntimeConfig:
     # drive a Python-sampled, seeded, logged dome-intensity sequence so dark
     # frames can be correlated with the light value that produced them.
     replicator_seed: int = 0                  # pins graph RNG + numpy RNG drawing the dome sequence
-    jitter_dome: bool = True
+    # Validated-working lighting (render848): a FIXED (un-jittered), non-normalized dome at
+    # intensity 1000 (the make_dome_light static value in build_scene) under exposure_time=1.0
+    # → fg_mean ~178. jitter_dome stays OFF — jitter is lighting domain-randomization (variety),
+    # but the validated-lit config was the fixed one; dome_normalize=True divides intensity by
+    # ~4π solid angle → starves the dome into the ACES toe (dark wall). dome_intensity_range
+    # only feeds the jitter path and is unused while jitter_dome is False.
+    jitter_dome: bool = False
     dome_intensity_range: tuple[float, float] = (500.0, 1000.0)
-    dome_normalize: bool = True               # flip False to test "normalize starves the dome"
+    dome_normalize: bool = False
     log_lighting: bool = True                 # write <render_dir>/lighting_log.json
 
     # ── RTX exposure (dark-box fix) ──────────────────────────────────────────

@@ -6,6 +6,13 @@ Phase 1 is skipped when the render dir already has obs/ frames — phases 2 and 
 are individually resumable, but re-rendering under an existing proposals/ would
 silently desync them. Delete the render dir to force a fresh render.
 
+After a FRESH render, on an interactive terminal the pipeline prints a
+foreground-luminance / dark-frame summary (via isaac-datagen-measure-luminance)
+and pauses for a y/N confirmation, so you can catch junk (e.g. the intermittent
+all-black renders) before the downstream phases spend compute on them; answer N
+to abort (render dir kept). Non-interactive runs (CI/cron/pipes) skip the prompt
+and continue.
+
 Multi-GPU phase 2: ``proposer_devices=[cuda:0,cuda:1]`` fans out one proposals
 subprocess per device, splitting the frame window contiguously. Phase 3 labels
 ALL frames, so a manually windowed run (start_frame/end_frame without full
@@ -38,6 +45,32 @@ def _run(script: str, *args: str) -> None:
     except subprocess.CalledProcessError as e:
         sys.exit(f"{script} failed with exit code {e.returncode} — fix and re-run "
                  f"(completed phases/frames are skipped on resume)")
+
+
+def _confirm_or_abort(render_dir: Path, n_obs: int) -> None:
+    """Pause after a fresh render so the user can eyeball the frames before the
+    pipeline spends compute on the downstream (no-Isaac) phases — useful given the
+    intermittent all-black-render bug. Only prompts on an interactive terminal;
+    non-interactive runs (CI/cron/pipes) continue uninterrupted.
+    """
+    if not sys.stdin.isatty():
+        return
+    # Auto-print the foreground-luminance / dark-frame catalog so obvious junk
+    # (the intermittent all-black renders) shows up without opening images.
+    exe = shutil.which("isaac-datagen-measure-luminance", path=str(Path(sys.executable).parent)) \
+        or shutil.which("isaac-datagen-measure-luminance")
+    if exe:
+        subprocess.run([exe, str(render_dir)], check=False)
+    else:
+        print("(isaac-datagen-measure-luminance not found — skipping dark-frame summary)", flush=True)
+    try:
+        ans = input(f"\nRendered {n_obs} frames to {render_dir / 'obs'} (dark-frame summary above).\n"
+                    f"Continue to proposals + inlier labeling? [y/N] ").strip().lower()
+    except EOFError:
+        ans = "n"
+    if ans not in ("y", "yes"):
+        sys.exit("aborted after render — downstream phases skipped; render dir kept, "
+                 "re-run isaac-datagen-pipeline to resume.")
 
 
 def _run_proposals_sharded(devices, n_obs: int, runtime) -> None:
@@ -74,6 +107,7 @@ def main():
     else:
         _run("isaac-datagen", *sys.argv[1:])
         n_obs = len(list(obs.glob("obs_*.png")))
+        _confirm_or_abort(render_dir, n_obs)   # gate: inspect fresh render before downstream phases
 
     devices = runtime.proposer_devices or ()
     if len(devices) > 1:
