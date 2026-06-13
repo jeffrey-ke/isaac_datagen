@@ -6,13 +6,16 @@ readme = "README.md"
 authors = [
     { name = "Jeffrey Ke", email = "jeffke613@gmail.com" }
 ]
-requires-python = ">=3.11"
-# numpy/torch/pillow left unpinned: isaacsim hard-pins numpy==1.26.0,
-# pillow==11.3.0 and drives torch==2.7.0. reference-matching is deliberately
-# loose so it floats to those versions (proven resolvable alongside diffusers
-# 0.37 / transformers 5.9 / lightglue).
+# isaacsim 6.0 ships cp312 wheels only — pin to 3.12.
+requires-python = ">=3.12,<3.13"
+# numpy/torch/pillow left unpinned: isaacsim hard-pins these and drives torch.
+# reference-matching is deliberately loose so it floats to those versions
+# (proven resolvable alongside diffusers 0.37 / transformers 5.9 / lightglue).
+# isaacsim 6.0 resolves to: numpy==2.3.1, pillow==12.1.1, torch==2.11.0+cu128,
+# torchvision==0.26.0+cu128 (the 5.1.0 line was numpy==1.26.0 / pillow==11.3.0 /
+# torch==2.7.0 — note the numpy 1->2 major jump; re-check downstream numpy-2 compat).
 dependencies = [
-    "isaacsim[all,extscache]==5.1.0",
+    "isaacsim[all,extscache]==6.0.0.1",
     "numpy",
     "scipy",
     "matplotlib",
@@ -55,13 +58,30 @@ requires = ["uv_build>=0.11.6,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv]
+# isaacsim 6.0 splits its dependency graph across NVIDIA's index and PyPI: some
+# transitive deps are PyPI-only at the required version (e.g. mujoco-usd-converter
+# ==0.2.0 — NVIDIA only ships 0.1.0). uv's default first-index-wins resolution stops
+# at the NVIDIA copy and never falls through to PyPI. unsafe-best-match considers all
+# (non-explicit) indexes and picks the best version, mirroring the documented
+# `pip install isaacsim[all,extscache]==6.0.0.1 --extra-index-url https://pypi.nvidia.com`.
+index-strategy = "unsafe-best-match"
+# isaacsim-core 6.0 exact-pins pre-release transitive deps (e.g. tinyobjloader==2.0.0rc13).
+# uv won't select a pre-release for a transitive dep unless enabled; pip does so implicitly
+# when the specifier names the rc. "allow" lets the isaacsim pins resolve. ("if-necessary"
+# won't do — tinyobjloader has stable releases globally, so the exact-rc pin isn't "necessary";
+# "explicit" only honors first-party markers, not isaacsim-core's.) Footprint is intentionally
+# just two packages, both shipped by NVIDIA for 6.0.0.1: tinyobjloader==2.0.0rc13 and
+# warp-lang==1.15.0.dev* (NVIDIA's index ships only this nightly for the Newton physics stack).
+prerelease = "allow"
 # The MSDeformAttn CUDA op builds against the env's torch (its setup.py imports torch).
 no-build-isolation-package = ["multiscaledeformableattention"]
 # detectron2 is a prebuilt wheel whose pt<torch><cuda> tag MUST match this env's exact torch
-# (isaacsim drives torch 2.7.0+cu128). Without this exact pin, uv picks the lexically-highest
+# (isaacsim 6.0 drives torch 2.11.0+cu128). Without this exact pin, uv picks the lexically-highest
 # variant from the index (e.g. pt2.9.1cu130) and imports die on libcudart.so.13 / undefined
-# torch symbols. Constraint, not a [project] pin, so it doesn't propagate further.
-constraint-dependencies = ["detectron2==0.6+fd27788pt2.7.0cu128"]
+# torch symbols. Constraint, not a [project] pin, so it doesn't propagate further. Only active
+# when the m2f extra is pulled (reference-matching[m2f]); inert in the default graph, but kept in
+# lockstep with torch so the extra stays installable. Move this whenever torch moves.
+constraint-dependencies = ["detectron2==0.6+fd27788pt2.11.0cu128"]
 
 [tool.uv.sources]
 vision-core = { path = "../vision_core", editable = true }
