@@ -2,10 +2,15 @@
 
 > **STATUS (2026-06-13):** Two distinct bugs in the `reference_segmentation` RTX render path.
 > **Bug 1 (dark boxes) — SOLVED** (underexposure; fix = `exposure_time=1.0`).
-> **Bug 2 (intermittent all-black renders) — IN PROGRESS.** Root cause isolated: the **DomeLight
-> intermittently contributes zero radiance in path tracing** (intensity correct at 1000, but HDR
-> scene RGB ≈ 0), ~60% of processes. Currently testing un-ablation of an analytic (distant) light as
-> the fix. All code changes below are **uncommitted** working-tree state.
+> **Bug 2 (intermittent all-black renders) — characterized, not yet fixed.** ~40% of *processes*
+> render correctly; ~60% render the **entire wall pure black for the whole process** (the path tracer
+> computes ~0 scene radiance from all lights — HDR RGB≈0, though dome intensity is correct at 1000).
+> The outcome is a **per-process coin flip locked in at renderer init, before the first frame, and
+> immutable for the process lifetime** — proven by a 40-frame run that stayed 100% black across all 40
+> frames (and a lit run 100% lit). It is **independent of every lever tried**: exposure, materials,
+> `rt_subframes`, PT accumulation, light type (dome vs distant), and multi_gpu. The two realistic paths
+> are **detect-and-retry** (relaunch until lit) or a deeper dig into the init race. All code changes
+> below are **uncommitted** working-tree state.
 
 Extends `lighting-diagnostic-dark-box-flags.md` (which covers only Bug 1's diagnostic plumbing).
 
@@ -98,13 +103,34 @@ exposure, accumulation, and LDR capture are all fine; the scene simply receives 
 | Phase F | material load | warmup via `orchestrator.step` | **crashed** — warmup steps advance the global counter that `rep.distribution.sequence` (camera) is indexed by → offset poses → "no labeled instances" assert |
 | Phase G | material load | `app.update` warmup=32 + `rt_subframes=20` | 10/15 black (unchanged); warmup is a **no-op in headless** (didn't change render time) |
 | Phase H | PT accumulation | `resetPtAccumOnlyWhenExternalFrameCounterChanges=True` (forum 229697) | 9/15 black (unchanged) |
+| distant | not dome/IBL-specific | un-ablate analytic distant light | 7/15 black; distant ALSO contributes ~0 on black frames |
+| multi_gpu | multi-GPU async race (OMREQ-1202) | `SimulationApp(multi_gpu=False)` | 11/15 black (unchanged) |
 
-### Current test (running)
-**Un-ablate the distant light** (analytic, not IBL → no init race) as reliable base illumination, dome
-optional. 15× repeat of the identical config; the probe shows whether the distant light lights the wall
-even on the renders where the dome contributes zero.
-- 0/15 black → analytic base lighting is the fix (≈ the original recipe + exposure fix).
-- still black → distant too weak (probe `hdr_max` will say) or analytic shares the race.
+### The 40-frame test — the outcome is locked at init, so warmup is dead (renders 930, 933)
+"If warmup-by-rendering helped, why don't the later frames of a render come out lit?" — exactly. Ran a
+single process of **40 frames** (`num_frames=8`, no warmup):
+- A **black** process (render930) stayed **100% black across all 40 frames** — `ldr_max=0, hdr_max=1.0`
+  every frame, no recovery, no transition.
+- A **lit** process (render933, found on the 3rd relaunch — ~40% hit rate) was **100% lit across all 40**
+  (fg_mean ~128–172).
+
+So a process is **wholly** black or lit; it never mixes or recovers. This **kills the warmup hypothesis**
+(you cannot render your way out of a black process) and explains why every per-frame lever was
+irrelevant: the black/lit state is decided **once at renderer initialization, before the first frame,
+and is immutable for the process**. It's a startup coin flip, not a settle/convergence problem.
+
+### Distant-light test (renders 898–912) — did NOT fix it, and reframed the bug
+Un-ablated the distant light (analytic, not IBL) as base illumination, dome still on, 15× repeat.
+**Result: 7/15 still black.** Crucially, the probe on the black frames shows `hdr_max=1.0` (alpha only)
+→ the **distant light *also* contributes ~0 radiance** on those frames (a few are barely-lit, fg_mean
+~2–3 with `hdr_max≈1.0–1.2`). So an IBL light (dome) **and** an analytic light (distant) fail to
+illuminate *together*, per process.
+
+**Revised diagnosis: this is NOT dome/IBL-specific.** All lighting intermittently produces ~0 radiance
+in the path tracer, per-process, regardless of light type — a fundamental **PT render/lighting
+initialization race** (light list / NEE / multi-GPU composite not ready on the first captured frame),
+not anything about a specific light. (Side note: dome+distant lit frames came out ~130–165, slightly
+*dimmer* than dome-only ~178 — unexplained, not pursued.)
 
 ---
 
@@ -144,10 +170,14 @@ even on the renders where the dome contributes zero.
 
 - **`runtime_config.py`** — exposure knobs (`set_exposure=True`, `exposure_time=1.0`, `f_number=5`,
   `film_iso=100`); capture-readiness knobs (`render_warmup_frames=0`, `rt_subframes=20`); + asserts.
-- **`scene.py`** `boot_sim` — apply exposure; `resetPtAccumOnlyWhenExternalFrameCounterChanges=True`;
-  `[TONEMAP]` confirmation print. `register_dome_jitter` reverted sequence→`uniform`. `build_scene`
-  **un-ablated `make_distant_light`** (sphere still ablated).
-- **`capture.py`** — `app.update()` warmup before writer attach; `rt_subframes`/`warmup_frames` threaded.
+- **`scene.py`** `boot_sim` — apply exposure; `resetPtAccumOnlyWhenExternalFrameCounterChanges=True`
+  (Phase H, no effect — keep or drop); `[TONEMAP]` confirmation print; `multi_gpu` back to `True`
+  (ruled-out test reverted). `register_dome_jitter` reverted sequence→`uniform`. `build_scene` distant
+  light **re-ablated** (un-ablation didn't help).
+- **`capture.py`** — `capture_session` warmup removed (app.update was a headless no-op). `capture_with_poses`
+  carries **disproven warmup scaffolding** (default off, `warmup_frames=0`): pads the pose sequence with
+  leading copies of pose[0] and sets `writer._warmup_skip`. NOTE: half-wired — the writer-side skip was
+  never added, so this is dead/inconsistent code to remove (the 40-frame test killed the warmup idea).
 - **`clean_datagen.py`** — pass `rt_subframes`/`render_warmup_frames` into `capture_with_poses`.
 - **`reference_seg_writer.py`** — **DEBUG**: `HdrColor` annotator + `[PROBE]` print (remove before commit).
 - **`measure_luminance.py`** — `load_lighting` guards the new dict-shaped log entry.
@@ -156,15 +186,24 @@ even on the renders where the dome contributes zero.
 
 ## Next directions
 
-1. **(running) Distant-light reliability** — does an analytic base light eliminate the black?
-2. If yes → **production recipe = analytic light(s) + exposure fix**, dome demoted to optional fill;
-   decide sphere vs distant and tune intensities at `exposure_time=1.0`.
-3. If no → dome/IBL init research: a *real* post-setup render settle (without desyncing the camera
-   sequence), dome environment rebuild, or `/rtx/domeLight/...` settings; or detect-and-retry black
-   renders as a stopgap.
-4. **Cleanup before commit:** remove the `HdrColor`/`[PROBE]` debug from `reference_seg_writer.py`;
-   decide whether to keep `resetPtAccum`, the `rt_subframes`/warmup knobs, and fix the `set_render_pathtraced`
-   totalSpp clobber; un-ablate or deliberately retire the sphere light.
+The 40-frame test reframed everything: the black/lit state is a **per-process init coin flip**, locked
+before frame 0 and immutable — not a settle/warmup/convergence problem. Every per-frame and per-setting
+lever is therefore a dead end (and all have been tried). Two realistic paths:
+
+1. **Detect-and-retry (pragmatic, robust — recommended stopgap).** After each render, measure foreground
+   luminance; if black, **relaunch the whole process** (fresh `idx`) until lit. ~40% hit rate → ~2.5
+   attempts/good render. Wraps cleanly around the per-render datagen invocation; no RTX internals
+   needed. Cost: ~2.5× render processes (boot dominates, so ~2.5× wall-clock).
+2. **Dig into the process-init race (real fix).** The decision happens at renderer/Hydra init before the
+   first frame and is sticky. Candidate angles not yet explored: the RTX scene/light-BVH build at first
+   render (is the light list ever empty for a process?); `--reset-user` / a clean Kit config;
+   driver/OptiX context init nondeterminism; whether a *synchronous, fully-settled first render*
+   (`/app/asyncRendering=False` + a blocking settle that does NOT use the sequence-coupled
+   orchestrator.step) changes the rate. Lower confidence — five setting-level hypotheses already failed.
+3. **Cleanup before commit:** remove the `HdrColor`/`[PROBE]` debug from `reference_seg_writer.py`;
+   remove the now-disproven warmup machinery (the `app.update`/padding+skip path in `capture.py`,
+   `render_warmup_frames`); decide whether to keep `resetPtAccum` and the `rt_subframes` knob; fix the
+   `set_render_pathtraced` totalSpp clobber; `multi_gpu` left at `True` (revert of the ruled-out test).
 
 ---
 
@@ -182,4 +221,8 @@ even on the renders where the dome contributes zero.
 | 860–875 | Phase G (app.update warmup + rt_subframes=20) | 10/15 black |
 | 876–891 | Phase H (resetPtAccum) | 9/15 black |
 | 892–897 | HDR probe | dome_I=1000 but HDR RGB≈0 on black frames |
-| 898–912 | distant-light un-ablation (running) | pending |
+| 898–912 | distant-light un-ablation | 7/15 black; distant ALSO contributes ~0 → not light-type-specific |
+| 913–927 | `multi_gpu=False` | 11/15 black → multi-GPU ruled out |
+| **930** | **40-frame single process (black draw)** | **all 40 black, no recovery** |
+| 931, 932 | 40-frame relaunches | black |
+| **933** | **40-frame single process (lit draw)** | **all 40 lit (~128–172)** → per-process all-or-nothing confirmed |
