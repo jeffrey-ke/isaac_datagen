@@ -126,22 +126,11 @@ class RuntimeConfig:
     f_number: float = 5.0                     # aperture f-stop; lower = brighter (∝ 1/f_number²)
     film_iso: float = 100.0                   # sensor ISO; higher = brighter (∝ iso/100)
 
-    # ── PathTracing capture readiness (intermittent all-black-render fix) ─────
-    # PT + per-frame texture randomization over a many-box wall intermittently
-    # renders the WHOLE wall pure black (per-process, all frames) when capture
-    # starts before MDL materials/textures are GPU-resident. Two documented
-    # levers (Isaac 5.1 Replicator troubleshooting; IsaacSim GitHub #426):
-    #   render_warmup_frames : app.update() pumps BEFORE the writer attaches.
-    #                          Default 0: empirically a no-op in headless (didn't
-    #                          change render time or the black-render rate), since
-    #                          headless RTX renders only on orchestrator.step().
-    #   rt_subframes         : subframes per captured frame. With PT accumulation
-    #                          on (resetPtAccumOnlyWhenExternalFrameCounterChanges,
-    #                          set in boot_sim) these subframes ACCUMULATE into a
-    #                          converged frame — which is what removes the black
-    #                          coin flip. Higher = more samples + load slack, at
-    #                          proportional render-time cost.
-    render_warmup_frames: int = 0
+    # Subframes accumulated per captured frame — the documented "materials not
+    # loaded in time" / denoise knob (≥2 per Isaac 5.1 Replicator troubleshooting).
+    # NOTE: this did NOT fix the intermittent all-black render; that is a
+    # per-process renderer-init coin flip decided before the first frame, not a
+    # per-frame settle issue. See .docs_claude/plans/active/render-darkness-investigation.md.
     rt_subframes: int = 20
 
     def __post_init__(self):
@@ -159,7 +148,6 @@ class RuntimeConfig:
         assert self.exposure_time > 0, f"exposure_time must be > 0: {self.exposure_time}"
         assert self.f_number > 0, f"f_number must be > 0: {self.f_number}"
         assert self.film_iso > 0, f"film_iso must be > 0: {self.film_iso}"
-        assert self.render_warmup_frames >= 0, f"render_warmup_frames must be >= 0: {self.render_warmup_frames}"
         assert self.rt_subframes >= 1, f"rt_subframes must be >= 1: {self.rt_subframes}"
         assert Path(self.dataset_dir).exists(), f"dataset_dir missing: {self.dataset_dir}"
         assert Path(self.intrinsics_path).exists(), f"intrinsics_path missing: {self.intrinsics_path}"

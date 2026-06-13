@@ -237,6 +237,8 @@ def boot_sim(runtime, render_dir):
         "headless": True,
         "width": runtime.width,
         "height": runtime.height,
+        # multi_gpu ruled out as the cause of the intermittent all-black render
+        # (11/15 black with False vs 9/15 with True — unchanged).
         "multi_gpu": True,
         # "active_gpu": 0,
         # "physics_gpu": 0,
@@ -330,10 +332,9 @@ def build_scene(runtime, objects: List[GraspableObject], rng):
     make_dome_light(stage, "/World", intensity=1000.0 if runtime.dome_light else 0.0,
                     normalize=runtime.dome_normalize)
     # make_sphere_light(stage, "/World")    # ablated: localized inverse-square falloff = the dark-wall culprit
-    # Analytic base light (NOT IBL): un-ablated to test whether it reliably lights the
-    # wall when the DomeLight intermittently contributes zero radiance in PT (the
-    # per-process all-black bug — dome I=1000 but HDR≈0). Distant has no IBL init race.
-    make_distant_light(stage, "/World")
+    # make_distant_light(stage, "/World")   # ablated again: un-ablating it did NOT fix the intermittent
+    #   all-black bug (7/15 black) — the distant light ALSO contributes ~0 radiance on black frames, so
+    #   the bug is not light-type-specific (a PT render/lighting init race, not dome/IBL).
 
     parent_path = "/World/GeneratedPallets"
     create_prim(parent_path, "Xform")

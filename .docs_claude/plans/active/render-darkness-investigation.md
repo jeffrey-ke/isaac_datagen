@@ -169,16 +169,14 @@ not anything about a specific light. (Side note: dome+distant lit frames came ou
 ## Code changes (all uncommitted)
 
 - **`runtime_config.py`** — exposure knobs (`set_exposure=True`, `exposure_time=1.0`, `f_number=5`,
-  `film_iso=100`); capture-readiness knobs (`render_warmup_frames=0`, `rt_subframes=20`); + asserts.
+  `film_iso=100`); `rt_subframes=20` knob; + asserts. (Warmup knob `render_warmup_frames` removed.)
 - **`scene.py`** `boot_sim` — apply exposure; `resetPtAccumOnlyWhenExternalFrameCounterChanges=True`
   (Phase H, no effect — keep or drop); `[TONEMAP]` confirmation print; `multi_gpu` back to `True`
   (ruled-out test reverted). `register_dome_jitter` reverted sequence→`uniform`. `build_scene` distant
   light **re-ablated** (un-ablation didn't help).
-- **`capture.py`** — `capture_session` warmup removed (app.update was a headless no-op). `capture_with_poses`
-  carries **disproven warmup scaffolding** (default off, `warmup_frames=0`): pads the pose sequence with
-  leading copies of pose[0] and sets `writer._warmup_skip`. NOTE: half-wired — the writer-side skip was
-  never added, so this is dead/inconsistent code to remove (the 40-frame test killed the warmup idea).
-- **`clean_datagen.py`** — pass `rt_subframes`/`render_warmup_frames` into `capture_with_poses`.
+- **`capture.py`** — **warmup machinery removed** (the 40-frame test killed it): `capture_session` and
+  `capture_with_poses` are back to plain capture; `rt_subframes` still threaded.
+- **`clean_datagen.py`** — pass `rt_subframes` into `capture_with_poses`.
 - **`reference_seg_writer.py`** — **DEBUG**: `HdrColor` annotator + `[PROBE]` print (remove before commit).
 - **`measure_luminance.py`** — `load_lighting` guards the new dict-shaped log entry.
 
@@ -200,10 +198,9 @@ lever is therefore a dead end (and all have been tried). Two realistic paths:
    driver/OptiX context init nondeterminism; whether a *synchronous, fully-settled first render*
    (`/app/asyncRendering=False` + a blocking settle that does NOT use the sequence-coupled
    orchestrator.step) changes the rate. Lower confidence — five setting-level hypotheses already failed.
-3. **Cleanup before commit:** remove the `HdrColor`/`[PROBE]` debug from `reference_seg_writer.py`;
-   remove the now-disproven warmup machinery (the `app.update`/padding+skip path in `capture.py`,
-   `render_warmup_frames`); decide whether to keep `resetPtAccum` and the `rt_subframes` knob; fix the
-   `set_render_pathtraced` totalSpp clobber; `multi_gpu` left at `True` (revert of the ruled-out test).
+3. **Cleanup before commit:** ✅ warmup machinery removed; ✅ distant re-ablated; ✅ multi_gpu back to
+   True. Still TODO: remove the `HdrColor`/`[PROBE]` debug from `reference_seg_writer.py`; decide whether
+   to keep `resetPtAccum` and the `rt_subframes` knob; fix the `set_render_pathtraced` totalSpp clobber.
 
 ---
 

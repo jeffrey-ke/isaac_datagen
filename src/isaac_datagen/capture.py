@@ -106,30 +106,15 @@ def attach_writers(pairs):
 
 
 @contextmanager
-def capture_session(writers, cameras, n_frames, replicator, rt_subframes=20, warmup_frames=8):
+def capture_session(writers, cameras, n_frames, replicator, rt_subframes=20):
     """Open a Replicator capture scope around caller-defined per-frame ops.
 
-    Warms up (pumps `warmup_frames` app updates BEFORE attaching the writer or
-    registering any trigger) so MDL materials and box-wall textures compile and
-    become GPU-resident before capture — otherwise PT + texture randomization
-    intermittently renders the whole wall pure black for the whole process
-    (Isaac 5.1 Replicator troubleshooting; IsaacSim GitHub #426). The warmup MUST
-    be app.update(), not orchestrator.step(): every orchestrator.step() advances
-    the global counter that the camera's rep.distribution.sequence is indexed by,
-    so warmup steps would offset the pose schedule (camera lands on out-of-range
-    poses → frames with no labeled instances → writer assert).
-
-    Then enters rep.new_layer(), attaches writers to camera render products under
+    Enters rep.new_layer(), attaches writers to camera render products under
     broadcast rules, yields rep so the caller can open whatever triggers and
     modifiers they want, then drives n_frames steps and waits for completion.
     """
     rep = replicator.rep
     pairs = _broadcast_pairs(writers, cameras)
-    if warmup_frames:
-        import omni.kit.app
-        app = omni.kit.app.get_app()
-        for _ in range(warmup_frames):
-            app.update()                       # render-only warmup: loads materials, no step/write/sequence advance
     with rep.new_layer():
         attach_writers(pairs)
         yield rep
@@ -149,7 +134,7 @@ def move_prims(prims, pose_sequences, replicator):
             )
 
 
-def capture_with_poses(world_poses, writer, camera, replicator, rt_subframes=20, warmup_frames=8):
+def capture_with_poses(world_poses, writer, camera, replicator, rt_subframes=20):
     """Move camera through world_poses and capture one frame per pose.
 
     Args:
@@ -158,7 +143,6 @@ def capture_with_poses(world_poses, writer, camera, replicator, rt_subframes=20,
         camera: camera object with .prim_path and .rps attributes.
         replicator: scene replicator handle (has .rep and .apply_randomizers()).
         rt_subframes: subframes per captured frame (PT material-load slack + denoise).
-        warmup_frames: discarded pre-capture renders to settle materials/textures.
     """
     rep = replicator.rep
     rig_node = rep.get.prim_at_path(camera.prim_path)
@@ -168,7 +152,6 @@ def capture_with_poses(world_poses, writer, camera, replicator, rt_subframes=20,
         n_frames=len(world_poses),
         replicator=replicator,
         rt_subframes=rt_subframes,
-        warmup_frames=warmup_frames,
     ) as rep:
         with rep.trigger.on_frame():
             move_prims([rig_node], [world_poses], replicator)
