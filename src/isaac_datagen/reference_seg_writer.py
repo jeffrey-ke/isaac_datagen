@@ -90,6 +90,7 @@ class ObsMaskWriter(Writer):
         self.data_structure = "renderProduct"
         self.annotators = [
             AnnotatorRegistry.get_annotator("rgb"),
+            AnnotatorRegistry.get_annotator("HdrColor"),   # DEBUG probe (black-render investigation)
             AnnotatorRegistry.get_annotator(
                 "instance_segmentation_fast",
                 init_params={"colorize": False},
@@ -136,6 +137,19 @@ class ObsMaskWriter(Writer):
     def write(self, data: dict):
         rp = data["renderProducts"][self._rp_key]
         rgb_hw3 = rp["rgb"]["data"][:, :, :3]
+
+        # DEBUG probe (black-render investigation): does a black frame have zero
+        # radiance in the raw HDR buffer (→ scene/lighting/beauty-pass), or only
+        # in the post-tonemap LDR `rgb` (→ capture/tonemap)? Also log the dome
+        # light's actual intensity at capture time.
+        import omni.usd
+        from pxr import UsdLux
+        _hdr = rp["HdrColor"]["data"] if "HdrColor" in rp else None
+        _hmax = float(np.asarray(_hdr).max()) if _hdr is not None else None
+        _dome = UsdLux.DomeLight.Get(omni.usd.get_context().get_stage(), "/World/DomeLight")
+        _di = _dome.GetIntensityAttr().Get() if _dome and _dome.GetPrim().IsValid() else None
+        print(f"[PROBE] f={self._frame_id} ldr_max={int(rgb_hw3.max())} hdr_max={_hmax} dome_I={_di}", flush=True)
+
         seg_hw = rp["instance_segmentation_fast"]["data"]
         labels = rp["instance_segmentation_fast"]["idToSemantics"]
 

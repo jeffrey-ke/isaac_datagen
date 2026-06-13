@@ -102,6 +102,48 @@ class RuntimeConfig:
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()
 
+    # ── Lighting diagnostics (dark-box investigation) ────────────────────────
+    # The debug scene is dome-only (sphere + distant ablated in scene.py); these
+    # drive a Python-sampled, seeded, logged dome-intensity sequence so dark
+    # frames can be correlated with the light value that produced them.
+    replicator_seed: int = 0                  # pins graph RNG + numpy RNG drawing the dome sequence
+    jitter_dome: bool = True
+    dome_intensity_range: tuple[float, float] = (500.0, 1000.0)
+    dome_normalize: bool = True               # flip False to test "normalize starves the dome"
+    log_lighting: bool = True                 # write <render_dir>/lighting_log.json
+
+    # ── RTX exposure (dark-box fix) ──────────────────────────────────────────
+    # The captured `rgb` AOV is post-tonemap LDR (ACES, /rtx/post/tonemap/op=6).
+    # Auto-exposure is off, so exposure is fixed by the photographic triangle
+    # below. The shipped carb default exposureTime=0.02s (a daylight shutter,
+    # ~EV100 10) underexposed our dome-lit scene into the ACES toe → the box wall
+    # quantized to exactly 0 until radiance cleared the toe, then snapped white
+    # (the dark-box cliff). A longer shutter pulls the wall into the midtones;
+    # lower f_number / higher film_iso also brighten. set_exposure=False leaves
+    # the RTX defaults untouched.
+    set_exposure: bool = True
+    exposure_time: float = 1.0                # shutter seconds; 0.02 (old default) → 1.0 ≈ +5.6 stops
+    f_number: float = 5.0                     # aperture f-stop; lower = brighter (∝ 1/f_number²)
+    film_iso: float = 100.0                   # sensor ISO; higher = brighter (∝ iso/100)
+
+    # ── PathTracing capture readiness (intermittent all-black-render fix) ─────
+    # PT + per-frame texture randomization over a many-box wall intermittently
+    # renders the WHOLE wall pure black (per-process, all frames) when capture
+    # starts before MDL materials/textures are GPU-resident. Two documented
+    # levers (Isaac 5.1 Replicator troubleshooting; IsaacSim GitHub #426):
+    #   render_warmup_frames : app.update() pumps BEFORE the writer attaches.
+    #                          Default 0: empirically a no-op in headless (didn't
+    #                          change render time or the black-render rate), since
+    #                          headless RTX renders only on orchestrator.step().
+    #   rt_subframes         : subframes per captured frame. With PT accumulation
+    #                          on (resetPtAccumOnlyWhenExternalFrameCounterChanges,
+    #                          set in boot_sim) these subframes ACCUMULATE into a
+    #                          converged frame — which is what removes the black
+    #                          coin flip. Higher = more samples + load slack, at
+    #                          proportional render-time cost.
+    render_warmup_frames: int = 0
+    rt_subframes: int = 20
+
     def __post_init__(self):
         assert (self.num_frames is None) ^ (self.grid_dims is None), \
             "exactly one of num_frames / grid_dims must be set"
@@ -111,6 +153,14 @@ class RuntimeConfig:
         assert self.placement in ("occupancy_grid", "until_exhausted_stacker"), \
             f"unknown placement policy: {self.placement!r}"
         assert self.column_height >= 1, f"column_height must be >= 1: {self.column_height}"
+        assert self.replicator_seed >= 0, f"replicator_seed must be >= 0: {self.replicator_seed}"
+        lo, hi = self.dome_intensity_range
+        assert lo <= hi, f"dome_intensity_range must have lo<=hi: {(lo, hi)}"
+        assert self.exposure_time > 0, f"exposure_time must be > 0: {self.exposure_time}"
+        assert self.f_number > 0, f"f_number must be > 0: {self.f_number}"
+        assert self.film_iso > 0, f"film_iso must be > 0: {self.film_iso}"
+        assert self.render_warmup_frames >= 0, f"render_warmup_frames must be >= 0: {self.render_warmup_frames}"
+        assert self.rt_subframes >= 1, f"rt_subframes must be >= 1: {self.rt_subframes}"
         assert Path(self.dataset_dir).exists(), f"dataset_dir missing: {self.dataset_dir}"
         assert Path(self.intrinsics_path).exists(), f"intrinsics_path missing: {self.intrinsics_path}"
         assert Path(self.proposer_config_path).exists(), f"proposer_config_path missing: {self.proposer_config_path}"

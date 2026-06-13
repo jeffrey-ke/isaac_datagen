@@ -3,6 +3,7 @@
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List
 
 import numpy as np
@@ -129,45 +130,22 @@ class ReplicatorWrapper:
             fn()
 
 
-def _target_range_to_world(runtime, target2world):
-    lo = np.array([runtime.xrange[0], runtime.yrange[0], runtime.zrange[0], 1.0])
-    hi = np.array([runtime.xrange[1], runtime.yrange[1], runtime.zrange[1], 1.0])
-    world_lo = (target2world @ lo)[:3]
-    world_hi = (target2world @ hi)[:3]
-    mn = np.minimum(world_lo, world_hi)
-    mx = np.maximum(world_lo, world_hi)
-    mn[2] = 0.3
-    mx[2] = 1.5
-    return (float(mn[0]), float(mn[1]), float(mn[2])), (float(mx[0]), float(mx[1]), float(mx[2]))
+def register_dome_jitter(rep, replicator, prim_path, runtime):
+    """Per-frame dome-intensity jitter, randomly sampled each frame.
 
-
-def register_sphere_jitter(rep, replicator, prim_path, world_lo, world_hi):
-    light_node = rep.get.prim_at_path(prim_path)
-    def jitter_lights():
-        with light_node:
-            rep.modify.attribute("colorTemperature", rep.distribution.normal(6500, 1000))
-            rep.modify.attribute("intensity", rep.distribution.uniform(0, 500000))
-            rep.modify.pose(position=rep.distribution.uniform(world_lo, world_hi))
-        return light_node.node
-    replicator.register(jitter_lights)
-
-
-def register_distant_jitter(rep, replicator, prim_path):
-    light_node = rep.get.prim_at_path(prim_path)
-    def jitter_distant():
-        with light_node:
-            rep.modify.attribute("intensity", rep.distribution.uniform(5000, 30000))
-            rep.modify.pose(rotation=rep.distribution.uniform((-30, -180, 0), (30, 180, 0)))
-        return light_node.node
-    replicator.register(jitter_distant)
-
-
-def register_dome_jitter(rep, replicator, prim_path):
-    dome_node = rep.get.prim_at_path(prim_path)
+    Stateless rep.distribution.uniform: it redraws on every orchestrator step,
+    seeded run-to-run by set_global_seed in make_replicator. (A Python-sampled
+    rep.distribution.sequence would let us log the exact per-frame values, but
+    sequence does not advance on an attribute write the way it does on
+    modify.pose — it sticks on the first value — so uniform is the path that
+    actually varies frame to frame.)
+    """
+    node = rep.get.prim_at_path(prim_path)
+    lo, hi = runtime.dome_intensity_range
     def jitter_dome():
-        with dome_node:
-            rep.modify.attribute("intensity", rep.distribution.uniform(500, 1000))
-        return dome_node.node
+        with node:
+            rep.modify.attribute("intensity", rep.distribution.uniform(lo, hi))
+        return node.node
     replicator.register(jitter_dome)
 
 
@@ -190,30 +168,44 @@ def register_box_texture_jitter(rep, replicator, texture_paths, shader_paths):
     replicator.register(randomize_box_textures)
 
 
-def make_replicator(runtime):
+def make_replicator(runtime, num_frames, render_dir):
+    """Dome-only lighting randomizer for the dark-box debug.
+
+    `num_frames` is len(world_poses) (= num_targets × num_frames, not num_frames),
+    threaded from the call site for the lighting_log header. Sphere + distant
+    lights are ablated (see build_scene); the dome intensity is jittered per
+    frame, seeded run-to-run by runtime.replicator_seed.
+    """
     import omni.replicator.core as rep
+    from omni.replicator.core.utils.rng import set_global_seed
+    set_global_seed(runtime.replicator_seed)
 
     replicator = ReplicatorWrapper(rep)
-    # world_lo, world_hi = _target_range_to_world(runtime, target2world)
-
-    # register_sphere_jitter(rep, replicator, "/World/SphereLight", world_lo, world_hi)
-    register_distant_jitter(rep, replicator, "/World/DistantLight")
-    if runtime.dome_light:
-        register_dome_jitter(rep, replicator, "/World/DomeLight")
+    log = {}
+    # sphere + distant ablated for the dark-box debug — the dome is the only light
+    if runtime.dome_light and runtime.jitter_dome:
+        register_dome_jitter(rep, replicator, "/World/DomeLight", runtime)
+        log["DomeLight"] = {"distribution": "uniform",
+                            "intensity_range": list(runtime.dome_intensity_range),
+                            "normalize": runtime.dome_normalize}
     if runtime.background_textures:
         register_background_jitter(rep, replicator, "/World/DomeLight", runtime.background_textures)
 
+    if runtime.log_lighting:
+        import json
+        (Path(render_dir) / "lighting_log.json").write_text(json.dumps(
+            {"num_frames": num_frames, "replicator_seed": runtime.replicator_seed, "lights": log}, indent=2))
     return replicator
 
 
-def make_dome_light(stage, parent, intensity=1000.0):
+def make_dome_light(stage, parent, intensity=1000.0, normalize=True):
     from pxr import UsdLux
     from isaacsim.core.utils.prims import create_prim
     path = f"{parent}/DomeLight"
     dome_prim = create_prim(path, "DomeLight")
     dome = UsdLux.DomeLight.Get(stage, path)
     dome.GetIntensityAttr().Set(intensity)
-    dome.GetNormalizeAttr().Set(True)
+    dome.GetNormalizeAttr().Set(normalize)
     return dome_prim
 
 
@@ -264,6 +256,39 @@ def boot_sim(runtime, render_dir):
     s.set("/omni/replicator/backends/disk/root_dir", os.path.abspath(render_dir))
     rep.settings.set_render_pathtraced()
 
+    # Intermittent all-black-render fix: by default a PT capture does NOT
+    # accumulate samples across the subframes of a single captured frame — the
+    # accumulation buffer resets every subframe, so each frame is effectively one
+    # noisy sample whose lit-vs-black outcome is a per-process coin flip (forum:
+    # "Replicator Path Tracing samples do not accumulate" /t/229697; the official
+    # PT capture preset sets this too). Turning it on makes the rt_subframes
+    # subframes accumulate into a converged frame. The orchestrator bumps
+    # /rtx/externalFrameCounter once per captured frame, so accumulation still
+    # resets cleanly between frames.
+    s.set("/rtx-transient/resetPtAccumOnlyWhenExternalFrameCounterChanges", True)
+
+    # Dark-box fix: the captured `rgb` AOV is post-tonemap LDR (ACES, op=6) and
+    # auto-exposure is off, so exposure is fixed by the photographic triangle.
+    # The shipped exposureTime=0.02s default underexposed the dome-lit scene into
+    # the ACES toe → uint8 crush to 0. Set a fixed exposure to land the box wall
+    # in the midtones; auto-exposure stays off so the per-frame dataset is
+    # deterministic. See RuntimeConfig.set_exposure / exposure_time / f_number.
+    if runtime.set_exposure:
+        s.set("/rtx/post/tonemap/exposureTime", runtime.exposure_time)
+        s.set("/rtx/post/tonemap/fNumber", runtime.f_number)
+        s.set("/rtx/post/tonemap/filmIso", runtime.film_iso)
+
+    # Confirm the RTX post/tonemap state that actually took (op==6 ACES expected).
+    print("[TONEMAP] " + " ".join(
+        f"{k}={s.get(k)!r}" for k in (
+            "/rtx/post/tonemap/op",
+            "/rtx/post/histogram/enabled",
+            "/rtx/post/tonemap/exposureTime",
+            "/rtx/post/tonemap/fNumber",
+            "/rtx/post/tonemap/filmIso",
+            "/rtx/post/tonemap/cm2Factor",
+        )), flush=True)
+
     return app
 
 
@@ -302,8 +327,12 @@ def build_scene(runtime, objects: List[GraspableObject], rng):
     if runtime.scene != "empty":
         load_asset("/World/Workbench", os.path.join(RESOURCE_PATH, "workbench_world.usd"))
 
-    make_dome_light(stage, "/World", intensity=1000.0 if runtime.dome_light else 0.0)
-    make_sphere_light(stage, "/World")
+    make_dome_light(stage, "/World", intensity=1000.0 if runtime.dome_light else 0.0,
+                    normalize=runtime.dome_normalize)
+    # make_sphere_light(stage, "/World")    # ablated: localized inverse-square falloff = the dark-wall culprit
+    # Analytic base light (NOT IBL): un-ablated to test whether it reliably lights the
+    # wall when the DomeLight intermittently contributes zero radiance in PT (the
+    # per-process all-black bug — dome I=1000 but HDR≈0). Distant has no IBL init race.
     make_distant_light(stage, "/World")
 
     parent_path = "/World/GeneratedPallets"

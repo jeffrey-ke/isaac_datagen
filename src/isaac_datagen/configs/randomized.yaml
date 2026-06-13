@@ -1,10 +1,10 @@
 idx: 1
-num_targets: 44
+num_targets: 5
 scene: empty
-dataset_dir: datasets/perspective-refseg
+dataset_dir: datasets/debug
 intrinsics_path: zed_K.npy
 pallet_dims: [11,1,4]
-num_frames: 25
+num_frames: 5
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True
@@ -17,7 +17,7 @@ inlier_border_eps: 2.0
 # along one axis on one side instead of orbiting. Widen these for a fuller halo.
 xrange: [0.35, 0.85]
 yrange: [-0.42, 0.42]
-zrange: [-0.10, 0.10]
+zrange: [-0.40, 0.40]
 
 # Pose-generation policy (posers.py registry). Ranges interpolate the halo box above.
 pose_generation_policy: LookAtPoser

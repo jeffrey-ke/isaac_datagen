@@ -94,8 +94,9 @@ def reference_segmentation():
         return
 
     writer = ObsMaskWriter(runtime.descriptor_config_path, runtime.descriptor_device, scene.objects, render_dir)
-    replicator = make_replicator(runtime)
-    capture_with_poses(world_poses, writer, scene.zed, replicator)
+    replicator = make_replicator(runtime, len(world_poses), render_dir)
+    capture_with_poses(world_poses, writer, scene.zed, replicator,
+                       rt_subframes=runtime.rt_subframes, warmup_frames=runtime.render_warmup_frames)
 
     # Write the per-render-dir catalog (id-space maps + per-class reference images + DIFT features).
     writer.finalize_metadata(render_dir)
