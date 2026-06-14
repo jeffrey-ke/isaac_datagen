@@ -12,6 +12,15 @@
 > are **detect-and-retry** (relaunch until lit) or a deeper dig into the init race. All code changes
 > below are **uncommitted** working-tree state.
 
+> **RECONCILIATION (2026-06-13):** Production lighting is **no longer dome-only**. `scene.build_scene`
+> now ships an aimed **DistantLight key + low DomeLight fill** (see `RuntimeConfig.distant_*` /
+> `dome_fill_intensity`); the sphere stays ablated, the distant light is restored as the key and aimed
+> at the grasp-target centroid via `look_at`+`cv2opengl` (so it can't point edge-on). Bug 1's fix
+> (`exposure_time=1.0`) is live in `boot_sim`. **Bug 2 is unaffected by this change** — it is
+> light-type-independent per the analysis below, so the distant key neither fixes nor worsens it;
+> mitigation remains detect-and-retry. The "dome-only" descriptions below are the *debug* scene, not
+> the live recipe.
+
 Extends `lighting-diagnostic-dark-box-flags.md` (which covers only Bug 1's diagnostic plumbing).
 
 ---

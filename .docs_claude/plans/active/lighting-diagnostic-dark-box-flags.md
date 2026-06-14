@@ -5,6 +5,13 @@
 > problem: the RTX tonemapper/exposure has a near-binary response (hard black floor → immediate
 > saturation), so the dome intensity has no usable midtone. See **Investigation results** at the
 > bottom for the data, the two bugs found, and where to take it next.
+>
+> **RECONCILIATION (2026-06-13):** The dome-only scene this doc describes is the *diagnostic* config,
+> not the live one. Production lighting is now an aimed **DistantLight key + low DomeLight fill**
+> (`scene.build_scene`; `RuntimeConfig.distant_*` / `dome_fill_intensity`). The sphere stays ablated
+> (inverse-square dark-wall); the distant light is restored as the key, aimed at the grasp-target
+> centroid via `look_at`+`cv2opengl` (no edge-on jitter). Bug 1's exposure fix lives in `boot_sim`.
+> The flags below remain valid for the dome-only debug path.
 
 ## Context
 

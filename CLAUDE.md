@@ -69,6 +69,8 @@ Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_da
 | `hardwares.py` | ZED Mini stereo camera rig | `ZedMini` |
 | `stereo_writer.py` | Replicator Writer → `StereoSample` | `StereoSampleWriter` |
 | `reference_seg_writer.py` | Replicator Writer → `ProtoReferenceSegSample` (precomputes DIFT ref features) | `ProtoReferenceSegWriter` |
+| `mesh_convert.py` | Build a `GraspableObject` dataset from arbitrary meshes (+ YCB download): stage candidate renders, then finalize winners | `convert`, `finalize`, `ycb_download` |
+| `mesh_blender.py` | Blender worker: mesh → `/World` usdz + 4 side-face ortho reference tiles | (run via `blender --background`) |
 
 External (sibling editable packages + heavy deps): `vision_core` (datastructs `SerializableSample`/`StereoSample`/`ReferenceSegSample`, `pose_utils`), `reference_matching` (DIFT `descriptor`, `proposal`), `isaacsim==5.1.0` + `omni.replicator.core`, `pxr`/USD, torch/torchvision.
 
@@ -97,6 +99,11 @@ Documentation, plans, style guidance, and investigation notes live in `.docs_cla
 - `.docs_claude/plans/active/` -- plans currently in progress
 - `.docs_claude/plans/completed/` -- finished plans (see `extract-isaac-datagen.md` for how this repo was extracted standalone)
 - `.docs_claude/style-and-beliefs/` -- code style and design principles
+
+`mesh_convert.py`'s reference-image render generalizes the original `build_object_dataset.py`
+(headless Blender, ortho cam at the −Y face), preserved verbatim at
+`visual_servoing/datagen2_isaacsim/.build_object_dataset.py.bak`. `mesh_blender.py` extends it to
+all 4 side faces and orients each ortho camera with `cv2opengl(look_at)`.
 
 ## Plans & workflow
 

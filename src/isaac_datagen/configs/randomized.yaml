@@ -1,4 +1,4 @@
-idx: 0
+idx: 2
 num_targets: 5
 scene: empty
 dataset_dir: datasets/perspective-refseg
@@ -8,6 +8,15 @@ num_frames: 50
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True
+
+# Lighting: aimed DistantLight key + DomeLight fill (see RuntimeConfig). The key is
+# aimed at the grasp-target centroid; distant_light_offset is the sun direction
+# (front-top into the -Y faces). TUNE distant_intensity on the first render.
+distant_light: True
+distant_intensity: 3000.0
+distant_angle: 0.53
+distant_light_offset: [1.0, -3.0, 3.0]
+dome_fill_intensity: 200.0
 
 # Phase-3 inliers: border margin (px) a proposal must keep inside its class union mask.
 inlier_border_eps: 2.0
@@ -26,8 +35,19 @@ pose_generation_policy_args:
   yrange: ${yrange}
   zrange: ${zrange}
 
+# Invisible shadow-casting occluders, per grasp target (0 = off). Placed once via
+# this poser, sampled in the TARGET frame then mapped to world by target2world.
+# Ranges offset the occluder between the key light and the box — TUNE on first lit render.
+occluders_per_target: 2
+occluder_pose_policy: GridFixedPoser
+occluder_pose_policy_args:
+  xrange: [0.10, 0.30]
+  yrange: [-0.15, 0.15]
+  zrange: [-0.15, 0.15]
+  target_to_ego_ypr: [90, 0, 90]
+  random: true
+
 proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
 descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/descriptor.yaml
 
 graspable_objects_path: /home/jeffk/repo/visual_servoing/datagen2_isaacsim/object_dataset_amazon
-

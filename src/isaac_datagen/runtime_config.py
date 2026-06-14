@@ -99,20 +99,44 @@ class RuntimeConfig:
     pose_generation_policy: str = "GridFixedPoser"
     pose_generation_policy_args: dict = field(default_factory=dict)
 
+    # Shadow-occluder domain randomization (scene.add_shadow_occluders): per grasp
+    # target, place this many invisible shapes (0 = off) that cast path-traced
+    # shadows on the box but are hidden from the camera (primvars:hideForCamera).
+    # Each is positioned once via its own poser (same registry as the camera),
+    # sampled in the target frame and mapped to world via the target's target2world.
+    occluders_per_target: int = 0
+    occluder_pose_policy: str = "GridFixedPoser"
+    occluder_pose_policy_args: dict = field(default_factory=dict)
+
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()
 
+    # ── Lighting: DistantLight key + DomeLight fill ──────────────────────────
+    # DistantLight is the main source: parallel rays → uniform wall irradiance
+    # (no inverse-square dark-wall falloff) and crisp directional shadows for the
+    # occluders. It is AIMED at the grasp-target centroid via look_at+cv2opengl
+    # (see build_scene), not hand-rotated. distant_light_offset is the "sun"
+    # position relative to that centroid — DIRECTION ONLY matters (distant light),
+    # default front-top into the -Y camera-facing faces. Dome is a low ambient
+    # fill so shadowed faces don't crush. TUNE distant_intensity (and/or
+    # exposure_time) on the first render to land fg_mean ~120-180; keep
+    # dome_fill_intensity ~10-20% of the key.
+    distant_light: bool = True
+    distant_intensity: float = 3000.0
+    distant_angle: float = 0.53                        # angular diameter (deg); raise → softer penumbra
+    distant_light_offset: tuple[float, float, float] = (1.0, -3.0, 3.0)  # sun pos rel. to centroid; dir only
+    dome_fill_intensity: float = 200.0
+
     # ── Lighting diagnostics (dark-box investigation) ────────────────────────
-    # The debug scene is dome-only (sphere + distant ablated in scene.py); these
-    # drive a Python-sampled, seeded, logged dome-intensity sequence so dark
-    # frames can be correlated with the light value that produced them.
+    # SUPERSEDED: the live recipe is the distant-key + dome-fill block above, not
+    # dome-only. These fields remain for the seeded dome-intensity diagnostic path
+    # only (jitter_dome=False by default → unused while the key light is static).
     replicator_seed: int = 0                  # pins graph RNG + numpy RNG drawing the dome sequence
-    # Validated-working lighting (render848): a FIXED (un-jittered), non-normalized dome at
-    # intensity 1000 (the make_dome_light static value in build_scene) under exposure_time=1.0
-    # → fg_mean ~178. jitter_dome stays OFF — jitter is lighting domain-randomization (variety),
-    # but the validated-lit config was the fixed one; dome_normalize=True divides intensity by
-    # ~4π solid angle → starves the dome into the ACES toe (dark wall). dome_intensity_range
-    # only feeds the jitter path and is unused while jitter_dome is False.
+    # Historical note (render848): a FIXED, non-normalized dome at intensity 1000 under
+    # exposure_time=1.0 → fg_mean ~178 was the validated dome-only config. dome_normalize=True
+    # divides intensity by ~4π solid angle → starves the dome into the ACES toe (dark wall);
+    # keep it False. dome_intensity_range only feeds the (off) jitter path. The dome is now a
+    # low fill (dome_fill_intensity), not the main light.
     jitter_dome: bool = False
     dome_intensity_range: tuple[float, float] = (500.0, 1000.0)
     dome_normalize: bool = False
