@@ -31,7 +31,7 @@ class RuntimeConfig:
     descriptor_device: str
     proposer_device: str
 
-    graspable_objects_path: str
+    graspable_objects_path: list[str]
 
     proposer_config_path: str
     descriptor_config_path: str

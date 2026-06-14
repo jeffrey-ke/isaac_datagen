@@ -50,7 +50,10 @@ occluder_scale: 0.06
 proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
 descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/descriptor.yaml
 
-graspable_objects_path: /home/jeffk/repo/visual_servoing/datagen2_isaacsim/object_dataset_amazon
+graspable_objects_path: 
+  - /home/jeffk/repo/visual_servoing/datagen2_isaacsim/object_dataset_amazon
+  - /home/jeffk/repo/visual_servoing/datagen2_isaacsim/kleenex_dataset
+  - /home/jeffk/repo/isaac_datagen/datasets/ycb_dataset
 
 obs_full_alpha: True
 filter_specs:
