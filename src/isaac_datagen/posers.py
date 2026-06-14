@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-from vision_core.pose_utils import generate_random_offsets, look_at, cv2opengl
+from vision_core.pose_utils import generate_random_offsets, look_at, cv2opengl, offset_to_4x4, add_rotation
 from isaac_datagen.pose_planning import plan_poses
 
 
@@ -59,3 +59,21 @@ class LookAtPoser:
         # Y and Z columns, flipping the look direction while keeping a proper rotation
         # (no mirrored image). Without this every camera faces 180deg away from the target.
         return np.array([cv2opengl(look_at(np.zeros(3), off)) for off in offsets])
+
+
+class FixedOffsetPoser:
+    """Deterministic single-offset poser: every call returns ONE fixed pose
+    (translation = offset, optional ypr), replicated num_frames times. For
+    controlled occluder placement (E4): add_shadow_occluders applies it as
+    t2w @ poser(1)[0], so the offset is a TARGET-frame point — +x is toward the
+    camera and the box sits at x<=0, making depth-along-x the penetrate/float knob
+    (offset=[0,0,0] straddles the box; offset=[0.2,0,0] floats in front)."""
+
+    def __init__(self, offset, ypr=(0.0, 0.0, 0.0)):
+        self.offset = np.asarray(offset, dtype=float)
+        self.ypr = ypr
+
+    def __call__(self, num_frames: int) -> np.ndarray:
+        yaw, pitch, roll = self.ypr
+        pose = add_rotation(offset_to_4x4(self.offset), z=yaw, y=pitch, x=roll)
+        return np.repeat(pose[None], num_frames, axis=0)

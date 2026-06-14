@@ -1,10 +1,10 @@
-idx: 2
-num_targets: 5
+idx: 14
+num_targets: 1
 scene: empty
 dataset_dir: datasets/perspective-refseg
 intrinsics_path: zed_K.npy
 pallet_dims: [11,1,4]
-num_frames: 50
+num_frames: 5
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True
@@ -37,15 +37,15 @@ pose_generation_policy_args:
 
 # Invisible shadow-casting occluders, per grasp target (0 = off). Placed once via
 # this poser, sampled in the TARGET frame then mapped to world by target2world.
-# Ranges offset the occluder between the key light and the box — TUNE on first lit render.
-occluders_per_target: 2
-occluder_pose_policy: GridFixedPoser
+# E4 (penetrate-vs-float test): one fixed-offset Cube per target. +x is toward the
+# camera and the box sits at x<=0, so offset=[0,0,0] straddles the box (penetrate)
+# and offset=[0.2,0,0] floats in front (override on the float run). occluder_scale
+# fixes the cube at ~half the old random size for a clean, reproducible placement.
+occluders_per_target: 1
+occluder_pose_policy: FixedOffsetPoser
 occluder_pose_policy_args:
-  xrange: [0.10, 0.30]
-  yrange: [-0.15, 0.15]
-  zrange: [-0.15, 0.15]
-  target_to_ego_ypr: [90, 0, 90]
-  random: true
+  offset: [0.0, 0.0, 0.0]
+occluder_scale: 0.06
 
 proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
 descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/descriptor.yaml
