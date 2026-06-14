@@ -53,13 +53,13 @@ reference descriptors (`ObsMaskMetadata.class_to_descriptors`).
 uv run clean_datagen.py <config.yaml>
 ```
 
-Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_datagen/configs/randomized.yaml idx=0 num_frames=8`. Console scripts: `isaac-datagen` → `reference_segmentation` (default), `isaac-datagen-stereo` → `main`.
+Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_datagen/configs/randomized.yaml idx=0 num_frames=8`. Console script: `isaac-datagen` → `reference_segmentation`.
 
 ## Module index
 
 | Module | Role | Key exports |
 |---|---|---|
-| `clean_datagen.py` | Entry points; orchestrates config→sim→scene→capture | `reference_segmentation`, `main`, `collect_objects` |
+| `clean_datagen.py` | Entry point; orchestrates config→sim→scene→capture | `reference_segmentation`, `collect_objects` |
 | `runtime_config.py` | `RuntimeConfig` schema + OmegaConf YAML/dotlist loader (`${call:…}` resolver) | `RuntimeConfig`, `load_config` |
 | `scene.py` | USD scene build, RTX `boot_sim`, lighting/texture randomizers | `boot_sim`, `build_scene`, `make_replicator`, `SceneHandle` |
 | `capture.py` | Replicator capture orchestration (sessions, pose-driven steps) | `capture_with_poses`, `get_target2world`, `make_index` |
@@ -86,9 +86,8 @@ build_scene → stage + workbench + lights + object stack (OccupancyGrid) + gras
          ↓
  reference_segmentation():  grasp pts → get_target2world → plan_poses → world_poses
                             → ProtoReferenceSegWriter → capture_with_poses → per-frame write() → serialize
- main() (stereo):           single grasp pt → make_index → StereoSampleWriter → capture_with_poses → serialize
          ↓
- render{idx:03d}/  (rgb/ ref_rgb/ seg_mask/ reference_features/  OR stereo fields) + runtime/descriptor yaml
+ render{idx:03d}/  (rgb/ ref_rgb/ seg_mask/ reference_features/) + runtime/descriptor yaml
 ```
 
 Capture mechanism: `capture_with_poses` → `capture_session` opens `rep.new_layer()`, attaches the writer to the camera's render products, uses `rep.trigger.on_frame()` to move the camera through the planned world poses and apply randomizers, steps the orchestrator once per frame, then `wait_until_complete()`. The writer's `write()` runs synchronously inside each render step (see `.docs_claude/` notes on render/write scheduling).
