@@ -18,7 +18,6 @@ from pathlib import Path
 import json
 import sys
 
-import numpy as np
 import yaml
 
 from isaac_datagen.scene import boot_sim, build_scene, make_replicator
@@ -26,6 +25,7 @@ from isaac_datagen.capture import get_target2world, capture_with_poses, plan_cap
 from isaac_datagen.runtime_config import load_config
 from isaac_datagen.objects import GraspableObject
 from isaac_datagen import posers
+from vision_core.seed_utils import seed_everything
 
 
 def collect_objects(path: str | Path) -> list[GraspableObject]:
@@ -38,15 +38,15 @@ def reference_segmentation():
 
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     render_dir.mkdir(parents=True, exist_ok=True)
+    seed_everything(runtime.effective_seed)        # seed = runtime.seed + runtime.idx; before boot_sim
     app = boot_sim(runtime, render_dir)
 
     from isaac_datagen.reference_seg_writer import ObsMaskWriter
 
-    rng = np.random.RandomState(runtime.seed)
     objects = collect_objects(runtime.graspable_objects_path)
-    scene = build_scene(runtime, objects, rng)
+    scene = build_scene(runtime, objects)
 
-    _idx, _grasp_points, world_poses = plan_capture(runtime, scene, rng)
+    _idx, _grasp_points, world_poses = plan_capture(runtime, scene)
 
     if runtime.dry_run:
         # Dry run: export scene.usdz + baked debug cameras (at the planned poses) +

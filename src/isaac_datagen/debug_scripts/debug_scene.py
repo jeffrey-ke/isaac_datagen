@@ -3,7 +3,7 @@
 Rebuilds exactly the scene `reference_segmentation()` builds (same objects
 slice, same seed, same pallet_dims), then:
 
-  1. Prints how many grasp points the scene actually has, the `rng.choice`
+  1. Prints how many grasp points the scene actually has, the `np.random.choice`
      indices that pick the per-target grasp frames, and the world-frame
      translation of every grasp point — so you can SEE whether the targets are
      distinct boxes or the same box repeated.
@@ -34,6 +34,7 @@ from isaac_datagen.capture import get_target2world
 from isaac_datagen.isaac_utils import export_subtree_usdz
 from isaac_datagen.runtime_config import load_config
 from isaac_datagen.clean_datagen import collect_objects
+from vision_core.seed_utils import seed_everything
 
 
 def main():
@@ -44,17 +45,17 @@ def main():
 
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     render_dir.mkdir(parents=True, exist_ok=True)
+    seed_everything(runtime.effective_seed)        # before boot_sim, mirroring reference_segmentation
     app = boot_sim(runtime, render_dir)
 
-    # Mirror reference_segmentation() exactly so the diagnosis is faithful:
-    # same objects slice, same rng, same build. build_scene does not consume rng,
-    # so rng.choice below sees the same state the real run does.
-    rng = np.random.RandomState(runtime.seed)
+    # Mirror reference_segmentation() exactly so the diagnosis is faithful: same seed
+    # (global, via seed_everything), same build, same global np.random.choice for the
+    # grasp picks — so the indices below match what the real run draws.
     objects = collect_objects(runtime.graspable_objects_path)
-    scene = build_scene(runtime, objects, rng)
+    scene = build_scene(runtime, objects)
 
     n = len(scene.grasp_points)
-    idx = rng.choice(n, size=runtime.num_targets)
+    idx = np.random.choice(n, size=runtime.num_targets)
     selected = [scene.grasp_points[i] for i in idx]
 
     all_t2w = get_target2world(scene.grasp_points)        # (n, 4, 4)
@@ -65,7 +66,7 @@ def main():
     lines.append(f"objects passed       = {len(objects)}  (collect_objects(...))")
     lines.append(f"num_targets (config) = {runtime.num_targets}")
     lines.append(f"len(grasp_points)    = {n}")
-    lines.append(f"rng.choice indices   = {idx.tolist()}")
+    lines.append(f"np.random.choice indices   = {idx.tolist()}")
     lines.append("")
     lines.append("ALL grasp points (path  ->  world translation):")
     for path, t2w in zip(scene.grasp_points, all_t2w):
@@ -78,7 +79,7 @@ def main():
     unique_xyz = {tuple(np.round(t[:3, 3], 4).tolist()) for t in sel_t2w}
     lines.append(f"=> {len(unique_xyz)} UNIQUE target translation(s) across {runtime.num_targets} targets")
     if len(unique_xyz) == 1:
-        lines.append("   !! all targets collapse to ONE box -- rng.choice repeats the same index")
+        lines.append("   !! all targets collapse to ONE box -- np.random.choice repeats the same index")
 
     report = "\n".join(lines)
     print(report)

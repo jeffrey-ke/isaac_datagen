@@ -32,7 +32,7 @@ def get_target2world(target_paths):
     return np.stack(poses)
 
 
-def plan_capture(runtime, scene, rng):
+def plan_capture(runtime, scene):
     """Pick per-target grasp frames and the world camera poses.
 
     THE single computation both the real render (reference_segmentation) and the
@@ -42,7 +42,7 @@ def plan_capture(runtime, scene, rng):
         (idx, grasp_points, world_poses): the chosen grasp-point indices, their
         prim paths, and the (B*N, 4, 4) world camera poses (targets × planned poses).
     """
-    idx = rng.choice(len(scene.grasp_points), size=runtime.num_targets)
+    idx = np.random.choice(len(scene.grasp_points), size=runtime.num_targets)
     grasp_points = [scene.grasp_points[i] for i in idx]
     target2worlds = get_target2world(grasp_points)                       # (B, 4, 4)
     poser = posers.get(runtime.pose_generation_policy)(**runtime.pose_generation_policy_args)

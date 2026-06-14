@@ -107,6 +107,7 @@ class RuntimeConfig:
     occluders_per_target: int = 0
     occluder_pose_policy: str = "GridFixedPoser"
     occluder_pose_policy_args: dict = field(default_factory=dict)
+    occluder_scale: float | None = None        # fixed cube scale; None → random uniform(0.04, 0.2)
 
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()
@@ -131,7 +132,6 @@ class RuntimeConfig:
     # SUPERSEDED: the live recipe is the distant-key + dome-fill block above, not
     # dome-only. These fields remain for the seeded dome-intensity diagnostic path
     # only (jitter_dome=False by default → unused while the key light is static).
-    replicator_seed: int = 0                  # pins graph RNG + numpy RNG drawing the dome sequence
     # Historical note (render848): a FIXED, non-normalized dome at intensity 1000 under
     # exposure_time=1.0 → fg_mean ~178 was the validated dome-only config. dome_normalize=True
     # divides intensity by ~4π solid angle → starves the dome into the ACES toe (dark wall);
@@ -172,7 +172,6 @@ class RuntimeConfig:
         assert self.placement in ("occupancy_grid", "until_exhausted_stacker"), \
             f"unknown placement policy: {self.placement!r}"
         assert self.column_height >= 1, f"column_height must be >= 1: {self.column_height}"
-        assert self.replicator_seed >= 0, f"replicator_seed must be >= 0: {self.replicator_seed}"
         lo, hi = self.dome_intensity_range
         assert lo <= hi, f"dome_intensity_range must have lo<=hi: {(lo, hi)}"
         assert self.exposure_time > 0, f"exposure_time must be > 0: {self.exposure_time}"
@@ -190,6 +189,12 @@ class RuntimeConfig:
             return self.num_frames
         assert self.grid_dims is not None
         return self.grid_dims
+
+    @property
+    def effective_seed(self) -> int:
+        """Per-render seed: base seed offset by render idx, so each render dir is
+        distinct yet reproducible (re-render same idx → identical scene)."""
+        return self.seed + self.idx
 
 
 def _glob_amazon_textures() -> list[str]:

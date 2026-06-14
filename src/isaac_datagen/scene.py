@@ -175,11 +175,11 @@ def make_replicator(runtime, num_frames, render_dir):
     no per-frame light jitter by default. `num_frames` is len(world_poses)
     (= num_targets × num_frames) threaded from the call site for the lighting_log header.
     The optional dome-intensity jitter (jitter_dome, off) and background jitter register
-    here when enabled, seeded run-to-run by runtime.replicator_seed.
+    here when enabled, seeded run-to-run by runtime.effective_seed.
     """
     import omni.replicator.core as rep
     from omni.replicator.core.utils.rng import set_global_seed
-    set_global_seed(runtime.replicator_seed)
+    set_global_seed(runtime.effective_seed)
 
     replicator = ReplicatorWrapper(rep)
     log = {}
@@ -196,7 +196,7 @@ def make_replicator(runtime, num_frames, render_dir):
     if runtime.log_lighting:
         import json
         (Path(render_dir) / "lighting_log.json").write_text(json.dumps(
-            {"num_frames": num_frames, "replicator_seed": runtime.replicator_seed, "lights": log}, indent=2))
+            {"num_frames": num_frames, "seed": runtime.effective_seed, "lights": log}, indent=2))
     return replicator
 
 
@@ -332,7 +332,7 @@ def add_grasp_frame(box_path):
 SHADOW_SHAPES = ("Cube", "Cone", "Cylinder", "Sphere")
 
 
-def add_shadow_occluders(stage, parent, grasp_frames, runtime, rng):
+def add_shadow_occluders(stage, parent, grasp_frames, runtime):
     """Place runtime.occluders_per_target invisible occluders per grasp target.
 
     Each occluder casts a path-traced shadow on its box but is hidden from the
@@ -341,7 +341,7 @@ def add_shadow_occluders(stage, parent, grasp_frames, runtime, rng):
     in the target frame, mapped to world via that target's target2world. Must run
     AFTER the stack is positioned so each grasp frame's target2world is final.
     Per-frame shadow variety comes from the moving camera + per-frame light jitter;
-    cross-render variety from the (unseeded) poser.
+    cross-render variety from the per-render-seeded poser (seed + idx).
     """
     from pxr import Sdf, UsdGeom
     from isaacsim.core.utils.prims import create_prim
@@ -354,14 +354,14 @@ def add_shadow_occluders(stage, parent, grasp_frames, runtime, rng):
     for ti, t2w in enumerate(target2worlds):
         for k in range(runtime.occluders_per_target):
             path = f"{parent}/ShadowOccluders/t{ti:03d}_occ{k}"
-            s = float(rng.uniform(0.04, 0.2))
+            s = runtime.occluder_scale if runtime.occluder_scale is not None else float(np.random.uniform(0.04, 0.2))
             create_prim(path, SHADOW_SHAPES[(ti + k) % len(SHADOW_SHAPES)], scale=(s, s, s))
             UsdGeom.PrimvarsAPI(stage.GetPrimAtPath(path)).CreatePrimvar(
                 "hideForCamera", Sdf.ValueTypeNames.Bool).Set(True)      # doNotCastShadows left unset
             set_prim_pose(path, t2w @ poser(1)[0])                       # target-frame sample → world
 
 
-def build_scene(runtime, objects: List[GraspableObject], rng):
+def build_scene(runtime, objects: List[GraspableObject]):
     from isaacsim.core.utils.stage import create_new_stage, get_current_stage
     from isaacsim.core.utils.prims import create_prim
     from isaacsim.core.utils.semantics import add_labels
@@ -409,7 +409,7 @@ def build_scene(runtime, objects: List[GraspableObject], rng):
                            angle=runtime.distant_angle, rotation=look_at_euler(eye, centroid))
 
     if runtime.occluders_per_target:
-        add_shadow_occluders(stage, "/World", grasp_frames_paths, runtime, rng)
+        add_shadow_occluders(stage, "/World", grasp_frames_paths, runtime)
 
     intrinsics = np.load(runtime.intrinsics_path)
     zed = ZedMini("gripper", "/World", intrinsics, width=runtime.width, height=runtime.height)
