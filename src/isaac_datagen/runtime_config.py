@@ -163,6 +163,12 @@ class RuntimeConfig:
     # per-frame settle issue. See .docs_claude/plans/active/render-darkness-investigation.md.
     rt_subframes: int = 20
 
+    # Inspection toggle: True → obs RGBA is fully opaque (alpha=255 everywhere) instead of
+    # cropped to graspable-instance pixels (composite_rgba). Lets you view the whole frame —
+    # shadows / background / occluders included. OFF by default; iid_mask still carries the true
+    # foreground, so the dataset contract is intact.
+    obs_full_alpha: bool = False
+
     def __post_init__(self):
         assert (self.num_frames is None) ^ (self.grid_dims is None), \
             "exactly one of num_frames / grid_dims must be set"

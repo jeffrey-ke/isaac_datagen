@@ -59,7 +59,7 @@ def reference_segmentation():
         return
 
     writer = ObsMaskWriter(runtime.descriptor_config_path, runtime.descriptor_device, scene.objects,
-                           render_dir)
+                           render_dir, full_alpha=runtime.obs_full_alpha)
     replicator = make_replicator(runtime, len(world_poses), render_dir)
     capture_with_poses(world_poses, writer, scene.zed, replicator, rt_subframes=runtime.rt_subframes)
 

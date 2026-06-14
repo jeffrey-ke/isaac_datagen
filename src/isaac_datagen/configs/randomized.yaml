@@ -51,3 +51,6 @@ proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching
 descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/descriptor.yaml
 
 graspable_objects_path: /home/jeffk/repo/visual_servoing/datagen2_isaacsim/object_dataset_amazon
+
+# Inspection: obs alpha fully opaque (view the whole frame). Set False for training data.
+obs_full_alpha: True

@@ -41,8 +41,10 @@ def alpha_from_instance_seg(seg: np.ndarray, valid_ids) -> np.ndarray:
     return np.isin(seg, list(valid_ids)).astype(np.uint8) * 255
 
 
-def composite_rgba(rgb: np.ndarray, seg: np.ndarray, valid_ids) -> np.ndarray:
-    alpha = alpha_from_instance_seg(seg, valid_ids)
+def composite_rgba(rgb: np.ndarray, seg: np.ndarray, valid_ids, full_alpha: bool = False) -> np.ndarray:
+    # full_alpha=True → fully opaque obs (no instance crop), for inspecting the whole frame.
+    alpha = (np.full(seg.shape, 255, np.uint8) if full_alpha
+             else alpha_from_instance_seg(seg, valid_ids))
     return np.concatenate([rgb[:, :, :3], alpha[:, :, None]], axis=-1)
 
 
@@ -86,6 +88,7 @@ class ObsMaskWriter(Writer):
         descriptor_device: str,
         object_specs,
         render_dir: str | Path,
+        full_alpha: bool = False,
     ):
         self.data_structure = "renderProduct"
         self.annotators = [
@@ -101,6 +104,7 @@ class ObsMaskWriter(Writer):
         ]
         self._render_dir = Path(render_dir)
         self._frame_id = 0
+        self._full_alpha = full_alpha
         self.iid_to_name: dict[int, str] = {}   # accumulated per frame (iids are session-local)
 
         # Static class catalog. cids are deterministic across render dirs only because
@@ -186,7 +190,7 @@ class ObsMaskWriter(Writer):
             lut[iid] = cid
         cid_mask = tv_tensors.Mask(torch.from_numpy(lut[seg_hw]))
 
-        obs_rgba = composite_rgba(rgb_hw3, seg_hw, frame_iid_to_name.keys())
+        obs_rgba = composite_rgba(rgb_hw3, seg_hw, frame_iid_to_name.keys(), full_alpha=self._full_alpha)
         obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
         iid_mask = tv_tensors.Mask(torch.from_numpy(seg_hw.astype(np.int32)))
 
