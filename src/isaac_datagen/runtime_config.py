@@ -17,6 +17,8 @@ import sys
 
 from omegaconf import OmegaConf
 
+from isaac_datagen.filters import FilterSpec
+
 
 @dataclass
 class RuntimeConfig:
@@ -98,6 +100,10 @@ class RuntimeConfig:
     # ctor kwargs verbatim. Mirrors segmentation OptimConfig (name + args).
     pose_generation_policy: str = "GridFixedPoser"
     pose_generation_policy_args: dict = field(default_factory=dict)
+
+    # Object-filter registry (filters.py): ordered {name, args} specs applied to the
+    # GraspableObject pool before scene build. Empty = no filtering (default).
+    filter_specs: list[FilterSpec] = field(default_factory=list)
 
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()

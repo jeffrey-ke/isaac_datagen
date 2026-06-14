@@ -338,7 +338,6 @@ def build_scene(runtime, objects: List[GraspableObject], rng):
 
     parent_path = "/World/GeneratedPallets"
     create_prim(parent_path, "Xform")
-
     stack_path, objects_paths, is_graspable = create_stack_of_objects(
         parent_path,
         objects,

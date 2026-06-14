@@ -31,3 +31,16 @@ descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matchi
 
 graspable_objects_path: /home/jeffk/repo/visual_servoing/datagen2_isaacsim/object_dataset_amazon
 
+# Object-filter registry (filters.py): ordered {name, args} specs applied to the
+# GraspableObject pool before scene build. Here: deterministically permute the pool so
+# grid-slot assignment (which boxes end up top / graspable) varies with the seed, then
+# cap how many objects matching a meta-field glob survive.
+# NOTE: placement=occupancy_grid is full-wall and needs len(objects) >= prod(pallet_dims)
+# = 44, and the pool is exactly 44, so any net drop trips the capacity guard. Every meta
+# 'name' here is 'amazon_*', so capping that glob at 44 keeps all 44 -> safe and inert.
+# Lower max (and shrink pallet_dims / switch placement) to actually drop matches.
+filter_specs:
+  - name: ShuffleFilter
+    args: {seed: 0}
+  - name: MetaFilter
+    args: {key: name, value: 'amazon_*', max: 5}
