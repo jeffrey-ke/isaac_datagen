@@ -2,12 +2,13 @@
 
     uv run src/isaac_datagen/mesh_convert.py ycb       <download_dir>            # fetch YCB
     uv run src/isaac_datagen/mesh_convert.py stage      <input_dir> <stage_dir>  # phase 1: render candidates
-    uv run src/isaac_datagen/mesh_convert.py finalize   <stage_dir> <output_dir> <winners.yaml>   # phase 2
+    uv run src/isaac_datagen/mesh_convert.py finalize   <stage_dir> <output_dir> [winners.yaml]   # phase 2
 
 Phase 1 (`convert`/stage): a headless Blender subprocess (mesh_blender.py) exports each .usdz and
 renders the 4 side-face ortho tiles; everything is written to <stage>/<label>/ with unique labels,
 plus a candidate.json holding the 4 grasp SE3s. NO GraspableObject is serialized -- you pick the
-winning face offline. Phase 2 (`finalize`): apply the winners -> serialize the dataset.
+winning face offline. Phase 2 (`finalize`): pick the winning face + class per object (interactive
+prompt when no winners.yaml is given, else apply a pre-written one) -> serialize the dataset.
 Generalizes visual_servoing/datagen2_isaacsim/.build_object_dataset.py.bak.
 """
 from __future__ import annotations
@@ -148,13 +149,76 @@ def convert(input_path, stage_path, names=None, classes=None):
           f"(winners.yaml: '<label>: +X'), then: finalize(stage, output, winners.yaml)")
 
 
-def finalize(stage_path, output_path, winners):
-    """PHASE 2 (select): `winners` maps object label -> winning face name ("+X"), or ->
-    {"face": "+X", "class": "can"} to also set/override class. Serializes the chosen reference
-    tile + grasp frame as a GraspableObject dataset at output_path. `winners` may be a dict or a
-    path to a winners.yaml (so a later script can just call finalize(...))."""
+def staged_labels(stage_path: Path) -> list[str]:
+    """Sorted object labels under the stage dir (each holds a candidate.json)."""
+    return sorted(d.name for d in Path(stage_path).iterdir()
+                  if d.is_dir() and (d / "candidate.json").exists())
+
+
+def open_grid(grid: Path):
+    """Best-effort pop the contact sheet in the OS image viewer (non-blocking; never fatal)."""
+    try:
+        subprocess.Popen(["xdg-open", str(grid)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as e:
+        print(f"    (couldn't open {grid}: {e})")
+
+
+def prompt_winners(stage_path, winners_path, show=True) -> dict:
+    """Interactively pick the winning face + class per staged object, saving winners_path after
+    every answer (so a long YCB session resumes if interrupted). For each object: open its grid.png,
+    then ask for the face (validated against that object's faces) and the class. Per-object commands:
+    blank = keep the saved choice, 's' = skip (leave undecided), 'q' = save and stop.
+    Returns the winners dict {label: {"face", "class"}}."""
+    stage_path, winners_path = Path(stage_path), Path(winners_path)
+    winners = yaml.safe_load(winners_path.read_text()) if winners_path.exists() else {}
+    labels = staged_labels(stage_path)
+    for i, label in enumerate(labels):
+        c = json.loads((stage_path / label / "candidate.json").read_text())
+        faces = c["faces"]
+        prev = winners.get(label)
+        prev_face = prev["face"] if isinstance(prev, dict) else prev
+        prev_cls = (prev.get("class") if isinstance(prev, dict) else None) or c["class"]
+        if show:
+            open_grid(stage_path / label / "grid.png")
+        print(f"\n[{i + 1}/{len(labels)}] {label}   faces: {' '.join(faces)}"
+              f"\n  grid: {stage_path / label / 'grid.png'}")
+        while True:
+            ans = input(f"  winning face{f' [{prev_face}]' if prev_face else ''} "
+                        f"(s=skip, q=save+quit): ").strip()
+            if ans == "q":
+                save_winners(winners, winners_path)
+                print(f"\nsaved {len(winners)} picks -> {winners_path} (stopped before {label})")
+                return winners
+            if ans == "s":
+                face = None; break
+            if not ans and prev_face:
+                face = prev_face; break
+            if ans in faces:
+                face = ans; break
+            print(f"    enter one of {faces}, or s/q")
+        if face is None:
+            continue
+        cls = input(f"  class{f' [{prev_cls}]' if prev_cls else ''}: ").strip() or prev_cls
+        winners[label] = {"face": face, "class": cls}
+        save_winners(winners, winners_path)
+    print(f"\nsaved {len(winners)} picks -> {winners_path}")
+    return winners
+
+
+def save_winners(winners, winners_path):
+    Path(winners_path).write_text(yaml.safe_dump(winners, sort_keys=True))
+
+
+def finalize(stage_path, output_path, winners=None, show=True):
+    """PHASE 2 (select): serialize the chosen reference tile + grasp frame as a GraspableObject
+    dataset at output_path. `winners` maps object label -> winning face name ("+X"), or ->
+    {"face": "+X", "class": "can"} to also set/override class. It may be a dict, a path to a
+    winners.yaml, or None to pick interactively (prompt_winners, saved to <stage>/winners.yaml)."""
     stage_path, output_path = Path(stage_path), Path(output_path)
-    if isinstance(winners, (str, Path)):
+    if winners is None:
+        winners = prompt_winners(stage_path, stage_path / "winners.yaml", show=show)
+    elif isinstance(winners, (str, Path)):
         winners = yaml.safe_load(Path(winners).read_text())
     output_path.mkdir(parents=True, exist_ok=True)
     for idx, label in enumerate(sorted(winners)):
@@ -196,11 +260,13 @@ if __name__ == "__main__":
     p_y = sub.add_parser("ycb");      p_y.add_argument("download_dir")
     p_s = sub.add_parser("stage");    p_s.add_argument("input_dir"); p_s.add_argument("stage_dir")
     p_f = sub.add_parser("finalize"); p_f.add_argument("stage_dir"); p_f.add_argument("output_dir")
-    p_f.add_argument("winners")
+    p_f.add_argument("winners", nargs="?", default=None,    # omit -> interactive face+class prompt
+                     help="winners.yaml; omit to pick interactively")
+    p_f.add_argument("--no-open", action="store_true", help="don't auto-open each grid.png")
     a = ap.parse_args()
     if a.cmd == "ycb":
         print(ycb_download(a.download_dir))
     elif a.cmd == "stage":
         convert(a.input_dir, a.stage_dir)
     else:
-        finalize(a.stage_dir, a.output_dir, a.winners)
+        finalize(a.stage_dir, a.output_dir, a.winners, show=not a.no_open)
