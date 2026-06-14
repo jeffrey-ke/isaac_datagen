@@ -36,8 +36,15 @@ class RuntimeConfig:
     proposer_config_path: str
     descriptor_config_path: str
 
+    # Object placement policy: "occupancy_grid" (static full-wall, uniform boxes,
+    # requires exactly prod(pallet_dims) objects) or "until_exhausted_stacker"
+    # (heterogeneous bboxes, columns of <= column_height, requires >= 1 object).
+    # Required (no default) so a config can't silently get the wrong policy.
+    placement: str
     pallet_dims: tuple[int, int, int]
     dome_light: bool
+
+    dry_run: bool
 
     # Phase-3 inliers: a proposal counts as an inlier only if it lies ≥ this many px
     # inside its class union mask (border margin; see vision_core.mask_utils.coords_in_mask).
@@ -54,12 +61,7 @@ class RuntimeConfig:
     # Dry run (dotlist: dry_run=true): build the scene and plan poses exactly as the
     # real run, then export scene.usdz + baked debug cameras/grasp-axes and the planned
     # poses for offline (Blender) inspection — skipping the writer and RTX capture.
-    dry_run: bool = False
 
-    # Object placement policy: "occupancy_grid" (static full-wall, uniform boxes,
-    # requires exactly prod(pallet_dims) objects) or "until_exhausted_stacker"
-    # (heterogeneous bboxes, columns of <= column_height, requires >= 1 object).
-    placement: str = "occupancy_grid"
     # until_exhausted_stacker only: max objects per vertical column.
     column_height: int = 5
 
@@ -161,6 +163,13 @@ class RuntimeConfig:
     # per-process renderer-init coin flip decided before the first frame, not a
     # per-frame settle issue. See .docs_claude/plans/active/render-darkness-investigation.md.
     rt_subframes: int = 20
+
+    # app.update() frames to settle RTX before capture: lets MDL shaders compile, the dome
+    # HDRI/textures stream in, and PT/denoiser state initialize, so frame 0 isn't a black
+    # coin flip. This targets the per-process renderer-init flip rt_subframes did NOT fix
+    # (see note above). Mirrors Isaac's camera-sensor warmup (isaacsim.sensors.camera tests:
+    # N x app.update() before reading pixels). 0 disables.
+    warmup_frames: int = 32
 
     # Inspection toggle: True → obs RGBA is fully opaque (alpha=255 everywhere) instead of
     # cropped to graspable-instance pixels (composite_rgba). Lets you view the whole frame —

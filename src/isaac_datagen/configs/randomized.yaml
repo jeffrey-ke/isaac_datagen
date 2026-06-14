@@ -1,19 +1,22 @@
-idx: 14
-num_targets: 1
+idx: 0
+num_targets: 5
 scene: empty
-dataset_dir: datasets/perspective-refseg
+dataset_dir: datasets/mixed-persp
 intrinsics_path: zed_K.npy
+placement: until_exhausted_stacker
 pallet_dims: [11,1,4]
-num_frames: 5
+num_frames: 25
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True
+
+dry_run: False
 
 # Lighting: aimed DistantLight key + DomeLight fill (see RuntimeConfig). The key is
 # aimed at the grasp-target centroid; distant_light_offset is the sun direction
 # (front-top into the -Y faces). TUNE distant_intensity on the first render.
 distant_light: True
-distant_intensity: 3000.0
+distant_intensity: 2000.0
 distant_angle: 0.53
 distant_light_offset: [1.0, -3.0, 3.0]
 dome_fill_intensity: 200.0
@@ -24,7 +27,7 @@ inlier_border_eps: 2.0
 # Camera pose-sampling box in the TARGET frame (the "halo" around each grasp point).
 # Currently near-degenerate: x and z are fixed, only y varies (-0.22..0) -> poses fan
 # along one axis on one side instead of orbiting. Widen these for a fuller halo.
-xrange: [0.35, 0.85]
+xrange: [0.45, 0.85]
 yrange: [-0.42, 0.42]
 zrange: [-0.40, 0.40]
 
@@ -41,10 +44,13 @@ pose_generation_policy_args:
 # camera and the box sits at x<=0, so offset=[0,0,0] straddles the box (penetrate)
 # and offset=[0.2,0,0] floats in front (override on the float run). occluder_scale
 # fixes the cube at ~half the old random size for a clean, reproducible placement.
-occluders_per_target: 1
-occluder_pose_policy: FixedOffsetPoser
+occluders_per_target: 0
+occluder_pose_policy: GridFixedPoser
 occluder_pose_policy_args:
-  offset: [0.0, 0.0, 0.0]
+  xrange: [0.85, 0.95]
+  yrange: [-0.42, 0.42]
+  zrange: [-0.40, 0.40]
+  target_to_ego_ypr: [0,0,0]
 occluder_scale: 0.06
 
 proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
@@ -58,6 +64,7 @@ graspable_objects_path:
 obs_full_alpha: True
 filter_specs:
   - name: ShuffleFilter
-    args: {seed: 0}
+    args: 
+      seed: ${idx}
   - name: MetaFilter
     args: {key: name, value: 'amazon_*', max: 5}

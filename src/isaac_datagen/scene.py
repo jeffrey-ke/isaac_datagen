@@ -35,10 +35,14 @@ def add_object(*, at_parent: str, obj: GraspableObject) -> str:
     # directly on a reference-carrying prim. The placement transform must land
     # on the plain Xform wrapper; the reference lives on a child that inherits
     # it. The source .usdz files have no defaultPrim, so reference "/World".
-    from pxr import Usd
+    from pxr import Usd, Tf
     from isaacsim.core.utils.stage import get_current_stage
     from isaacsim.core.utils.semantics import add_labels
-    wrapper_path = f"{at_parent}/{obj.meta['name']}"
+    # USD prim names must be valid identifiers; YCB names like "007_tuna_fish_can"
+    # lead with a digit (illegal -> SdfPath parses to <> and DefinePrim throws).
+    # Sanitize the path component only; the true name still rides on the instance
+    # semantic label below, which is what the iid->name->class chain reads.
+    wrapper_path = f"{at_parent}/{Tf.MakeValidIdentifier(obj.meta['name'])}"
     geo_path = f"{wrapper_path}/geo"
     stage = get_current_stage()
     with Usd.EditContext(stage, stage.GetRootLayer()):
@@ -274,6 +278,19 @@ def boot_sim(runtime, render_dir):
     s.set("/omni/replicator/backends/disk/root_dir", os.path.abspath(render_dir))
     rep.settings.set_render_pathtraced()
 
+    # Make rendering block: each app.update() returns only after Hydra has
+    # finished the frame, instead of dispatching it async and continuing. This
+    # is what the `isaacsim.exp.base.zero_delay.kit` experience flips on (and
+    # what SimulationContext.set_block_on_render(True) sets). Without it the
+    # warmup_render() loop's app.update() calls are fire-and-forget, so a fixed
+    # warmup_frames count can return before RTX has actually settled — the
+    # lit-vs-black coin flip. The paired updateOrder setting moves the
+    # render-complete check last for true zero-frame-delay. (base.kit already
+    # disables async *replicator* rendering for SDG; this is the stronger
+    # per-update blocking guarantee on top of that.)
+    s.set("/app/hydraEngine/waitIdle", True)
+    s.set("/app/updateOrder/checkForHydraRenderComplete", 1000)
+
     # Intermittent all-black-render fix: by default a PT capture does NOT
     # accumulate samples across the subframes of a single captured frame — the
     # accumulation buffer resets every subframe, so each frame is effectively one
@@ -308,6 +325,16 @@ def boot_sim(runtime, render_dir):
         )), flush=True)
 
     return app
+
+
+def warmup_render(app, n_frames):
+    """Settle the RTX renderer before capture: step the app n_frames times so MDL shaders
+    compile, the dome HDRI/textures stream in, and the PT/denoiser state initializes.
+    Without this the first captured frame(s) are a lit-vs-black coin flip (see boot_sim's
+    accumulation note). Mirrors Isaac's camera-sensor warmup (isaacsim.sensors.camera tests:
+    N x app.update() before reading pixels). n_frames == 0 is a no-op."""
+    for _ in range(n_frames):
+        app.update()
 
 
 def add_grasp_frame(box_path):
@@ -381,7 +408,7 @@ def build_scene(runtime, objects: List[GraspableObject]):
     # Dome is a low ambient fill so shadowed faces don't crush to black; the DistantLight
     # key (created below, after the geometry exists, so it can be aimed) is the main source.
     make_dome_light(stage, "/World",
-                    intensity=runtime.dome_fill_intensity if runtime.dome_light else 0.0,
+                    intensity=500 if runtime.dome_light else 0.0,
                     normalize=runtime.dome_normalize)
 
     parent_path = "/World/GeneratedPallets"
