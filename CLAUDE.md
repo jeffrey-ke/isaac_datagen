@@ -64,6 +64,7 @@ Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_da
 | `scene.py` | USD scene build, RTX `boot_sim`, lighting/texture randomizers | `boot_sim`, `build_scene`, `make_replicator`, `SceneHandle` |
 | `capture.py` | Replicator capture orchestration (sessions, pose-driven steps) | `capture_with_poses`, `get_target2world`, `make_index` |
 | `pose_planning.py` | Pure-numpy target-frame pose sampling | `plan_poses` |
+| `filters.py` | GraspableObject filter registry (name+args specs) | `filter_objects`, `FilterSpec`, `ClassFilter`, `ShuffleFilter` |
 | `objects.py` | Graspable objects, occupancy placement, sample datastructs | `GraspableObject`, `ProtoReferenceSegSample`, `OccupancyGrid` |
 | `isaac_utils.py` | USD/Replicator helpers (camera-from-K, transforms, prim search, USDZ export) | `setup_camera`, `load_asset`, `set_transform`, `find_prims`, `export_subtree_usdz`, `export_flattened_usdz` |
 | `hardwares.py` | ZED Mini stereo camera rig | `ZedMini` |
