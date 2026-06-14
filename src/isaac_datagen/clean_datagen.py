@@ -15,6 +15,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from dataclasses import asdict
 from pathlib import Path
+import itertools
 import json
 import sys
 
@@ -29,10 +30,6 @@ from isaac_datagen import posers
 from vision_core.seed_utils import seed_everything
 
 
-def collect_objects(path: str | Path) -> list[GraspableObject]:
-    path = Path(path)
-    n = len(sorted((path / "meta").glob("meta_*.yaml")))
-    return [GraspableObject.deserialize(i, path) for i in range(n)]
 
 def reference_segmentation():
     runtime = load_config(sys.argv[1], sys.argv[2:])
