@@ -24,6 +24,7 @@ from isaac_datagen.scene import boot_sim, build_scene, make_replicator
 from isaac_datagen.capture import get_target2world, capture_with_poses, plan_capture
 from isaac_datagen.runtime_config import load_config
 from isaac_datagen.objects import GraspableObject
+from isaac_datagen.filters import filter_objects
 from isaac_datagen import posers
 from vision_core.seed_utils import seed_everything
 
@@ -43,8 +44,11 @@ def reference_segmentation():
 
     from isaac_datagen.reference_seg_writer import ObsMaskWriter
 
-    objects = collect_objects(runtime.graspable_objects_path)
     scene = build_scene(runtime, objects)
+    objects = filter_objects(
+            collect_objects(runtime.graspable_objects_path),
+            runtime.filter_specs
+    )
 
     _idx, _grasp_points, world_poses = plan_capture(runtime, scene)
 

@@ -52,5 +52,9 @@ descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matchi
 
 graspable_objects_path: /home/jeffk/repo/visual_servoing/datagen2_isaacsim/object_dataset_amazon
 
-# Inspection: obs alpha fully opaque (view the whole frame). Set False for training data.
 obs_full_alpha: True
+filter_specs:
+  - name: ShuffleFilter
+    args: {seed: 0}
+  - name: MetaFilter
+    args: {key: name, value: 'amazon_*', max: 5}

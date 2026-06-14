@@ -17,6 +17,8 @@ import sys
 
 from omegaconf import OmegaConf
 
+from isaac_datagen.filters import FilterSpec
+
 
 @dataclass
 class RuntimeConfig:
@@ -99,15 +101,12 @@ class RuntimeConfig:
     pose_generation_policy: str = "GridFixedPoser"
     pose_generation_policy_args: dict = field(default_factory=dict)
 
-    # Shadow-occluder domain randomization (scene.add_shadow_occluders): per grasp
-    # target, place this many invisible shapes (0 = off) that cast path-traced
-    # shadows on the box but are hidden from the camera (primvars:hideForCamera).
-    # Each is positioned once via its own poser (same registry as the camera),
-    # sampled in the target frame and mapped to world via the target's target2world.
     occluders_per_target: int = 0
     occluder_pose_policy: str = "GridFixedPoser"
     occluder_pose_policy_args: dict = field(default_factory=dict)
     occluder_scale: float | None = None        # fixed cube scale; None → random uniform(0.04, 0.2)
+
+    filter_specs: list[FilterSpec] = field(default_factory=list)
 
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()
