@@ -72,7 +72,7 @@ Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_da
 | `mesh_convert.py` | Build a `GraspableObject` dataset from arbitrary meshes (+ YCB download): stage candidate renders, then finalize winners | `convert`, `finalize`, `ycb_download` |
 | `mesh_blender.py` | Blender worker: mesh → `/World` usdz + 4 side-face ortho reference tiles | (run via `blender --background`) |
 
-External (sibling editable packages + heavy deps): `vision_core` (datastructs `SerializableSample`/`StereoSample`/`ReferenceSegSample`, `pose_utils`), `reference_matching` (DIFT `descriptor`, `proposal`), `isaacsim==5.1.0` + `omni.replicator.core`, `pxr`/USD, torch/torchvision.
+External (sibling editable packages + heavy deps): `vision_core` (datastructs `SerializableSample`/`StereoSample`/`ReferenceSegSample`, `pose_utils`; source at `/home/jeffk/repo/vision_core/src/vision_core/`, `datastructs.py` is the dataset contract), `reference_matching` (DIFT `descriptor`, `proposal`; source at `/home/jeffk/repo/reference_matching/src/reference_matching/`), `isaacsim==5.1.0` + `omni.replicator.core`, `pxr`/USD, torch/torchvision. These editable deps import only inside the project venv — use `uv run` (plain `python3` has no venv).
 
 ## Data flow
 

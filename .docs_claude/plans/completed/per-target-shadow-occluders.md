@@ -5,6 +5,32 @@
 > (syntax, schema, config resolve, occluder poser `poser(1)→(1,4,4)`). Test 2 (end-to-end render) is blocked
 > until the key light is restored and the ~60% black-render bug is resolved — see "Update these" below.
 
+## Finding (E4, 2026-06-14): opaque shadows almost certainly come from PENETRATION
+
+The occluders rendering as opaque black blobs — the `hideForCamera`-ignored symptom; E1 measured them
+at 76–89% of render014 as UNLABELLED `iid=1` — **almost certainly come from the occluder geometry
+intersecting a box**, not merely from being in front of the camera.
+
+Controlled test (E4): one fixed-size (`occluder_scale=0.06`) Cube per target via a new deterministic
+`FixedOffsetPoser`, placed either straddling the box (target-frame `offset=[0,0,0]`, **penetrate**) or
+hovering in front with an air gap (`offset=[0.2,0,0]`, **float**). `+x` is toward the camera and the box
+sits at `x≤0`, so depth-along-x is the only knob. Effective seed matched within each pair → box + camera
+identical, occluder depth the only variable:
+
+| scene (effective_seed) | penetrate | float |
+|---|---|---|
+| 42 | `render041` | `render042` |
+| 44 | `render044` | `render043` |
+
+Across both scenes the penetrating cube yields the strong opaque region; the floating cube does not (to
+the same degree). This also re-explains render014: its random occluders (`x∈[0.10,0.40]`, scale up to
+~0.4 m) were big and close enough to reach into the box at `x≤0` → penetration → opaque.
+
+**Corollary / fix direction:** keep occluders OUT of the box (no intersection) — out-of-frustum behind
+the camera, or an air gap in front — and `hideForCamera` appears to behave (float occluders read as
+shadow-only). Still to confirm quantitatively with `debug/inspect_masks.py` on render041–044 — hence
+"almost certainly", not yet measured.
+
 ## Context
 Randomized **cast shadows of shapes** for sim2real robustness. No native shadow randomizer exists —
 compose it from per-target invisible 3D occluders whose path-traced shadows fall on the boxes.
