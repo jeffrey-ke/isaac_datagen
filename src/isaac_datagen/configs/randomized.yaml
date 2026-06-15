@@ -27,7 +27,7 @@ inlier_border_eps: 2.0
 # Camera pose-sampling box in the TARGET frame (the "halo" around each grasp point).
 # Currently near-degenerate: x and z are fixed, only y varies (-0.22..0) -> poses fan
 # along one axis on one side instead of orbiting. Widen these for a fuller halo.
-xrange: [0.45, 0.85]
+xrange: [0.25, 0.85]
 yrange: [-0.42, 0.42]
 zrange: [-0.40, 0.40]
 
@@ -54,6 +54,7 @@ occluder_pose_policy_args:
 occluder_scale: 0.06
 
 proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
+proposer_max_occlusion: 0.25
 descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/descriptor.yaml
 
 graspable_objects_path: 

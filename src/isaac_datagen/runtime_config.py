@@ -46,6 +46,8 @@ class RuntimeConfig:
 
     dry_run: bool
 
+    proposer_max_occlusion: float
+
     # Phase-3 inliers: a proposal counts as an inlier only if it lies ≥ this many px
     # inside its class union mask (border margin; see vision_core.mask_utils.coords_in_mask).
     inlier_border_eps: float
@@ -67,7 +69,6 @@ class RuntimeConfig:
 
     # Phase-2 proposals: skip objects whose occlusion ratio is ≥ this. A class is
     # kept if its best-visible member passes; NaN (unknown) never passes.
-    proposer_max_occlusion: float = 0.10
 
     # Phase-2 frame window (contiguous sharding): process frames
     # [start_frame, end_frame); end_frame=None → through the last frame.
