@@ -1,4 +1,4 @@
-"""Offline reference render: a GraspableObject dataset -> a PreOptFlowObject dataset.
+"""Offline reference render: a GraspableObject dataset -> a OptFlowObject dataset.
 
 Boot Isaac once, then for each object render an isolated perspective RGB-D view from a camera
 anchored on the (Stage-0 patched) grasp frame, using the SAME ``setup_camera`` pinhole +
@@ -22,7 +22,7 @@ import numpy as np
 from isaac_datagen.runtime_config import load_config
 from isaac_datagen.scene import boot_sim, warmup_render, make_dome_light
 from isaac_datagen.capture import set_prim_pose
-from isaac_datagen.objects import GraspableObject, PreOptFlowObject, UsdPath
+from isaac_datagen.objects import GraspableObject, OptFlowObject, UsdPath
 from isaac_datagen.isaac_utils import setup_camera, setup_render_product, load_asset, local_bbox_range
 from vision_core.pose_utils import look_at, cv2opengl
 
@@ -98,7 +98,7 @@ def main() -> None:
     for idx in range(n):
         obj = GraspableObject.deserialize(idx, in_dir)
         rgb, depth, ref_pose_cv = render_one(app, rep, obj, K, width, height, runtime)
-        PreOptFlowObject(
+        OptFlowObject(
             usd_path=UsdPath(str(obj.usd_path)),
             meta=obj.meta,
             reference_image=PILImage.fromarray(rgb),
