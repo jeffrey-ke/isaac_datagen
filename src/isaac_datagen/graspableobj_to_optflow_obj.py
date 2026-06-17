@@ -7,10 +7,11 @@ parity with the capture stage. Decoupled-offline, like ``mesh_convert.py``.
 
     uv run src/isaac_datagen/optflow_render.py <config.yaml> <graspable_dataset> <out_dataset> [key=val ...]
 
-The grasp frame defines the viewpoint: its origin is the face center and its +X column is the
-outward face normal (face_grasp_frames, mesh_convert.py), so the camera sits out along +X and
-looks back at the origin. The stored ``ref_pose`` is OpenCV (+Z-forward); the OpenGL pose is
-transient, used only to position the Isaac camera prim (Isaac cameras look down -Z).
+The grasp frame defines the VIEW DIRECTION: its +X column is the outward face normal
+(face_grasp_frames, mesh_convert.py), so the camera sits out along +X and looks back at the
+object CENTROID (not the grasp origin — a bottom-of-box grasp would otherwise crop the top).
+The stored ``ref_pose`` is OpenCV (+Z-forward); the OpenGL pose is transient, used only to
+position the Isaac camera prim (Isaac cameras look down -Z).
 """
 from __future__ import annotations
 
@@ -31,20 +32,23 @@ MARGIN = 1.1                  # standoff slack so the grasp face fills (not to-e
 
 
 def ref_pose_from_grasp(grasp_point, lo, hi, K, width, height, margin=MARGIN):
-    """OpenCV (+Z-forward) camera2local pose framing the grasp face.
+    """OpenCV (+Z-forward) camera2local pose framing the whole object.
 
-    Camera sits out along grasp +X and looks back at the grasp origin; the standoff is sized so
-    the in-plane face extents fit the FOV. ``lo``/``hi`` are the mesh-local bbox corners.
+    The grasp frame defines only the VIEW DIRECTION (its outward +X face normal); the camera
+    looks back at the object CENTROID, not the grasp origin, so the framing is centered on the
+    object regardless of where on the face the grasp point sits (e.g. a bottom-of-box grasp no
+    longer crops the top off). The standoff is sized so the full object extents fit the FOV.
+    ``lo``/``hi`` are the mesh-local bbox corners.
     """
-    origin = grasp_point[:3, 3]
-    normal = grasp_point[:3, 0] / np.linalg.norm(grasp_point[:3, 0])      # outward +X face normal
+    centroid = 0.5 * (lo + hi)                                            # object center, mesh-local
+    normal = grasp_point[:3, 0] / np.linalg.norm(grasp_point[:3, 0])      # outward +X grasp-face normal
     up = np.array([0.0, 0.0, 1.0])
     half_w = 0.5 * float(np.dot(hi - lo, np.abs(np.cross(up, normal))))   # in-plane horizontal half-extent
     half_h = 0.5 * float(hi[2] - lo[2])                                   # vertical (world-up) half-extent
     fx, fy = float(K[0, 0]), float(K[1, 1])
     hfov, vfov = 2 * np.arctan(width / (2 * fx)), 2 * np.arctan(height / (2 * fy))
     d = margin * max(half_w / np.tan(hfov / 2), half_h / np.tan(vfov / 2))
-    return look_at(at_coord=origin, from_coord=origin + d * normal)       # OpenCV camera2local
+    return look_at(at_coord=centroid, from_coord=centroid + d * normal)   # OpenCV camera2local
 
 
 def render_one(app, rep, obj, K, width, height, runtime):
