@@ -432,6 +432,32 @@ class UntilExhaustedStacker:
         return {p: (p in tops) for p in self._placements}
 
 
+class ShelfPlacer(UntilExhaustedStacker):
+    """UntilExhaustedStacker that groups same-class objects into the same columns.
+
+    Sorts prim_paths by their semantic "class" label (read off the loaded stage -- the
+    wrapper path encodes only the instance name) so each run of `column_height` adjacent
+    paths is one class: a shelf of cans next to a shelf of boxes. Layout/graspability are
+    inherited unchanged. Stable sort preserves within-class order; a class count not a
+    multiple of `column_height` yields one mixed boundary column, as with plain chunking.
+    """
+
+    def __init__(self, prim_paths, column_height):
+        from isaacsim.core.utils.semantics import get_labels
+        from isaacsim.core.utils.stage import get_current_stage
+
+        stage = get_current_stage()
+
+        def class_label(prim_path):
+            geo = stage.GetPrimAtPath(f"{prim_path}/geo")  # add_object labels geo as "class"
+            labels = get_labels(geo)
+            if not labels.get("class"):
+                raise ValueError(f"ShelfPlacer: no 'class' label on {prim_path}/geo")
+            return labels["class"][0]
+
+        super().__init__(sorted(prim_paths, key=class_label), column_height)
+
+
 class LoadedPallet:
     """A pallet loaded with boxes.
     
