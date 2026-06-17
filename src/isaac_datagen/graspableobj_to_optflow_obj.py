@@ -84,6 +84,13 @@ def render_one(app, rep, obj, K, width, height, runtime):
 
 
 def main() -> None:
+    """
+       uv run src/isaac_datagen/graspableobj_to_optflow_obj.py \
+          src/isaac_datagen/configs/randomized.yaml \
+          datasets/ycb_dataset \
+          datasets/ycb_preoptflow \
+          dataset_dir=datasets/ycb_dataset
+    """
     runtime = load_config(sys.argv[1], sys.argv[4:])                      # render settings + intrinsics_path
     in_dir, out_dir = Path(sys.argv[2]), Path(sys.argv[3])
     out_dir.mkdir(parents=True, exist_ok=True)
