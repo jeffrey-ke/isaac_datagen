@@ -24,7 +24,7 @@ one-liner, not part of this diff.
   `isaacsim.core.utils.semantics.get_labels(geo) -> {"class": [name], ...}` — same stage access the
   parent already uses in its own ctor.
 
-## Change: `src/isaac_datagen/objects.py` — add after `UntilExhaustedStacker` (line 448)
+## Change: add the `ShelfPlacer` class (as first landed: `objects.py` after `UntilExhaustedStacker`; **now lives in `placers.py`** — see Post-rebase)
 
 ```python
 class ShelfPlacer(UntilExhaustedStacker):
@@ -53,11 +53,14 @@ class ShelfPlacer(UntilExhaustedStacker):
         super().__init__(sorted(prim_paths, key=class_label), column_height)
 ```
 
-## Post-rebase (not in this branch's diff)
+## Post-rebase (done — see `object-placer-registry.md` §1b)
 
-Once rebased onto the registry branch, register + select it:
+Registered + selected after rebase onto the registry branch:
 
-- `placers.py`: add `from isaac_datagen.objects import ShelfPlacer  # noqa: F401`
+- **New home:** `ShelfPlacer` (and `UntilExhaustedStacker`) were moved out of `objects.py` **into
+  `placers.py`**, so defining the class there *is* the registration — there is no longer a
+  `from isaac_datagen.objects import ShelfPlacer` line. (First rebase did briefly add that import,
+  then forgot it — which is what motivated co-locating the placer classes with the registry.)
 - config: `placement: ShelfPlacer` + `placement_args: {column_height: 5}`
 
 `ShelfPlacer(prim_paths, column_height)` already fits the registry's `(prim_paths, **kwargs)`
@@ -65,7 +68,7 @@ contract, so no scene.py/runtime_config.py edits.
 
 ## Verification
 
-1. `uv run python -c "from isaac_datagen.objects import ShelfPlacer"` — bare import works (isaacsim
+1. `uv run python -c "from isaac_datagen.placers import ShelfPlacer"` — bare import works (isaacsim
    imports are inside `__init__`).
 2. After rebase, a short multi-class run (`placement=ShelfPlacer`,
    `placement_args={column_height:3}`): inspect the exported scene USDZ and confirm each column is a

@@ -16,10 +16,12 @@ Two facts from exploration shape the plan:
 - **`clean_datagen.py:144` is a broken half-edit:** `build_scene(runtime, objects, runtime.policy)`
   passes a 3rd arg `build_scene` doesn't accept and reads a nonexistent `runtime.policy`. Revert it.
 
-Outcome: adding a new placement policy = define a class in `objects.py` (contract:
+Outcome: adding a new placement policy = define a class in `placers.py` (contract:
 `__init__(prim_paths, **kwargs)`, `__call__(prim_path) -> (translation, rotation)`,
-`graspability() -> dict[path, bool]`), import it into `placers.py`, name it in config. No edits to
-`scene.py`'s dispatch.
+`graspability() -> dict[path, bool]`) and name it in config. No edits to `scene.py`'s dispatch.
+(Originally the placer classes lived in `objects.py` and `placers.py` imported them; they were later
+**moved into `placers.py`** so the registry's home also defines its entries — see §1b. Registration
+is now just defining the class there.)
 
 ## Decisions (confirmed)
 
@@ -30,7 +32,8 @@ Outcome: adding a new placement policy = define a class in `objects.py` (contrac
 
 ## The placer contract (already satisfied by `UntilExhaustedStacker`)
 
-`objects.py:379 UntilExhaustedStacker` already satisfies the contract as-is — **no ctor change**:
+`UntilExhaustedStacker` (now in `placers.py`; originally `objects.py:379`) already satisfies the
+contract as-is — **no ctor change**:
 `__init__(self, prim_paths, column_height)`, `__call__(self, prim_path) -> (translation, rotation)`,
 `graspability() -> dict`.
 
@@ -60,8 +63,9 @@ Placer contract:
 from __future__ import annotations
 
 import sys
+from collections import deque
 
-from isaac_datagen.objects import UntilExhaustedStacker  # noqa: F401 — registry entry
+from isaac_datagen.isaac_utils import local_bbox_range
 
 
 def get(name: str):
@@ -69,7 +73,29 @@ def get(name: str):
         return getattr(sys.modules[__name__], name)
     except AttributeError as e:
         raise KeyError(name) from e
+
+# ... followed by the UntilExhaustedStacker and ShelfPlacer class definitions (see §1b).
 ```
+
+> Final state shown. As first landed, `placers.py` instead held
+> `from isaac_datagen.objects import UntilExhaustedStacker  # noqa: F401 — registry entry` and defined
+> no classes; §1b moved the classes in.
+
+### 1b. Follow-up — placer classes moved into `placers.py`
+
+After the registry landed (and `ShelfPlacer` was added in the sibling `shelf-placer.md`), the
+registered placer classes were moved out of `objects.py` into `placers.py`, so the registry's home
+also *defines* its entries (no import-to-register step a rebase can silently drop — which is exactly
+what happened to `ShelfPlacer`). Net:
+
+- `placers.py` now **defines** `UntilExhaustedStacker` and `ShelfPlacer` (verbatim move) and imports
+  `collections.deque` + `isaac_utils.local_bbox_range` directly; the `from isaac_datagen.objects
+  import …` line is gone.
+- `objects.py` drops those two classes and the now-unused `deque` / `local_bbox_range` imports.
+- `OccupancyGrid` and `LoadedPallet` **stay** in `objects.py` (retired-from-registry / warehouse
+  domain — unchanged from the original decision).
+- Dependency now flows one way: `scene.py → placers.py → isaac_utils`; `placers.py` no longer imports
+  `objects.py`.
 
 ### 2. `scene.py` — registry dispatch + drop dead helper
 
