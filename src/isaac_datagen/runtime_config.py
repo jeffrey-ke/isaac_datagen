@@ -23,6 +23,7 @@ from isaac_datagen.filters import FilterSpec
 @dataclass
 class RuntimeConfig:
     idx: int
+    mode: str
     num_targets: int
     scene: str
     dataset_dir: str
@@ -31,7 +32,6 @@ class RuntimeConfig:
     descriptor_device: str
     proposer_device: str
 
-    graspable_objects_path: list[str]
 
     proposer_config_path: str
     descriptor_config_path: str
@@ -184,10 +184,11 @@ class RuntimeConfig:
     # ── Optical-flow dataset (Plan 2) ────────────────────────────────────────
     # mode selects the orchestrator in clean_datagen.main():
     #   "reference_segmentation" (default, ObsMask dataset) or "optflow" (OptFlow dataset).
-    mode: str = "reference_segmentation"
-    # PreOptFlowObject dataset dir(s) the optflow orchestrator places + captures
-    # (mirrors graspable_objects_path). Required only when mode="optflow".
-    optflow_objects_path: list[str] = field(default_factory=list)
+    # Object dataset dir(s) the active orchestrator places + captures. `mode` already
+    # selects the collector that interprets these (collect_objects for
+    # reference_segmentation, collect_preoptflow for optflow), so one field suffices
+    # and is required for both modes.
+    objects_path: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         assert (self.num_frames is None) ^ (self.grid_dims is None), \
@@ -202,8 +203,7 @@ class RuntimeConfig:
         assert self.film_iso > 0, f"film_iso must be > 0: {self.film_iso}"
         assert self.rt_subframes >= 1, f"rt_subframes must be >= 1: {self.rt_subframes}"
         assert self.mode in ("reference_segmentation", "optflow"), f"unknown mode: {self.mode!r}"
-        if self.mode == "optflow":
-            assert self.optflow_objects_path, "mode=optflow requires optflow_objects_path"
+        assert self.objects_path, f"mode={self.mode} requires objects_path"
         assert Path(self.dataset_dir).exists(), f"dataset_dir missing: {self.dataset_dir}"
         assert Path(self.intrinsics_path).exists(), f"intrinsics_path missing: {self.intrinsics_path}"
         assert Path(self.proposer_config_path).exists(), f"proposer_config_path missing: {self.proposer_config_path}"
