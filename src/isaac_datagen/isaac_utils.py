@@ -345,3 +345,12 @@ def export_flattened_usdz(stage, output_dir, base_name="scene"):
     return export_subtree_usdz(
         stage, default_prim.GetPath().pathString, output_dir, base_name=base_name
     )
+
+def class_label(prim_path):
+    from isaacsim.core.utils.semantics import get_labels
+    stage = get_current_stage()
+    geo = stage.GetPrimAtPath(f"{prim_path}/geo")  # add_object labels geo as "class"
+    labels = get_labels(geo)
+    if not labels.get("class"):
+        raise ValueError(f"ShelfPlacer: no 'class' label on {prim_path}/geo")
+    return labels["class"][0]

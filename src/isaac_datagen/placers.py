@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 from collections import deque
 
-from isaac_datagen.isaac_utils import local_bbox_range
+from isaac_datagen.isaac_utils import local_bbox_range, class_label
 
 
 def get(name: str):
@@ -91,16 +91,4 @@ class ShelfPlacer(UntilExhaustedStacker):
     """
 
     def __init__(self, prim_paths, column_height):
-        from isaacsim.core.utils.semantics import get_labels
-        from isaacsim.core.utils.stage import get_current_stage
-
-        stage = get_current_stage()
-
-        def class_label(prim_path):
-            geo = stage.GetPrimAtPath(f"{prim_path}/geo")  # add_object labels geo as "class"
-            labels = get_labels(geo)
-            if not labels.get("class"):
-                raise ValueError(f"ShelfPlacer: no 'class' label on {prim_path}/geo")
-            return labels["class"][0]
-
         super().__init__(sorted(prim_paths, key=class_label), column_height)
