@@ -4,6 +4,30 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 
 import numpy as np
+import torch
+from torchvision import tv_tensors
+
+
+def cid_iid_masks(seg_hw, labels, class_to_cid):
+    """Class-id and instance-id masks from an instance_segmentation_fast payload.
+
+    seg_hw: (H, W) raw iid array. labels: idToSemantics {iid → {"class", "instance"}}.
+    class_to_cid: {class name → cid}. Returns (iid_mask, cid_mask, frame_iid_to_name) —
+    two (H, W) tv_tensors.Mask + the graspable {iid → instance name} this frame
+    (background/scenery carry no "instance" key).
+    """
+    frame_iid_to_name = {int(k): v["instance"] for k, v in labels.items() if "instance" in v}
+    frame_iid_to_cid = {
+        int(k): class_to_cid[v["class"]]
+        for k, v in labels.items()
+        if "class" in v and v["class"] in class_to_cid
+    }
+    lut = np.zeros(max(int(seg_hw.max()), max(frame_iid_to_cid, default=0)) + 1, dtype=np.uint8)
+    for iid, cid in frame_iid_to_cid.items():
+        lut[iid] = cid
+    cid_mask = tv_tensors.Mask(torch.from_numpy(lut[seg_hw]))
+    iid_mask = tv_tensors.Mask(torch.from_numpy(seg_hw.astype(np.int32)))
+    return iid_mask, cid_mask, frame_iid_to_name
 
 
 @dataclass

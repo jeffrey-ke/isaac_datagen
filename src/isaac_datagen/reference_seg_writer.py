@@ -27,6 +27,8 @@ from omni.replicator.core import AnnotatorRegistry, Writer
 from vision_core.datastructs import ObsMask, ObsMaskMetadata
 from vision_core.viz import fit_pca_basis
 
+from isaac_datagen.isaac_utils import cid_iid_masks
+
 
 def _pil_to_tv_rgba(pil_img: PILImage.Image) -> tv_tensors.Image:
     if pil_img.mode != "RGBA":
@@ -156,11 +158,7 @@ class ObsMaskWriter(Writer):
         seg_hw = rp["instance_segmentation_fast"]["data"]
         labels = rp["instance_segmentation_fast"]["idToSemantics"]
 
-        # Only instances carrying an "instance" semantic are graspable objects;
-        # BACKGROUND and UNLABELLED scenery (e.g. the workbench) carry no such key.
-        frame_iid_to_name = {
-            int(k): v["instance"] for k, v in labels.items() if "instance" in v
-        }
+        iid_mask, cid_mask, frame_iid_to_name = cid_iid_masks(seg_hw, labels, self.class_to_cid)
         if not frame_iid_to_name:
             raise ValueError("write() called with no labeled instances — expected ≥1")
         self.iid_to_name.update(frame_iid_to_name)
@@ -176,22 +174,8 @@ class ObsMaskWriter(Writer):
             present_iids,
         )
 
-        # Class-id mask: LUT remap iid → cid via the class half of idToSemantics, so all
-        # same-class boxes share one value. Unknown iids (background, UNLABELLED, scenery)
-        # default to 0.
-        frame_iid_to_cid = {
-            int(k): self.class_to_cid[v["class"]]
-            for k, v in labels.items()
-            if "class" in v and v["class"] in self.class_to_cid
-        }
-        lut = np.zeros(max(int(seg_hw.max()), max(frame_iid_to_cid, default=0)) + 1, dtype=np.uint8)
-        for iid, cid in frame_iid_to_cid.items():
-            lut[iid] = cid
-        cid_mask = tv_tensors.Mask(torch.from_numpy(lut[seg_hw]))
-
         obs_rgba = composite_rgba(rgb_hw3, seg_hw, frame_iid_to_name.keys(), full_alpha=self._full_alpha)
         obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
-        iid_mask = tv_tensors.Mask(torch.from_numpy(seg_hw.astype(np.int32)))
 
         ObsMask(obs=obs, iid_mask=iid_mask, cid_mask=cid_mask, iid_to_occlusion=iid_to_occlusion) \
             .serialize(self._frame_id, self._render_dir)

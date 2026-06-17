@@ -197,15 +197,21 @@ class OptFlowSample(SerializableSample):
     intrinsics, placement) live once-per-render-dir in ``OptFlowMetadata``.
     """
     observation: tv_tensors.Image    # (3, H, W) obs RGB
+    cid_mask: tv_tensors.Mask
+    iid_mask: tv_tensors.Mask
     observation_depth: np.ndarray    # (H, W) float32 metric z-depth, full frame (distance_to_image_plane)
     cam2world: np.ndarray            # (4, 4) obs camera2world SE3, OpenCV (+Z-forward)
 
-    # observation → .png (base tv_tensors.Image serializer); depth / cam2world → .npy (base np.ndarray).
-    _serializers = SerializableSample._serializers
+    # observation → .png; depth / cam2world → .npy; cid_mask / iid_mask → .npy.
+    _serializers = {
+        **SerializableSample._serializers,
+        **ReferenceSegSample._serializers,   # adds tv_tensors.Mask → .npy
+    }
 
     def visualize(self, md, *, cls_name=None, points=None, n_points=12, rel=0.05, title=None) -> np.ndarray:
         """GT reference→observation correspondence as labeled points, for eyeballing the warp.
 
+        A top ``[cid_mask | iid_mask]`` row shows the per-pixel id masks with class/instance legends.
         One ``[ref | obs]`` row per class (pass ``cls_name`` to restrict to one). The class's single
         canonical reference is warped — via RoMa's ``get_gt_warp`` (the exact warp the trainer uses)
         — into EVERY instance of that class (1-to-many): reference candidates are numbered neutral
@@ -222,7 +228,7 @@ class OptFlowSample(SerializableSample):
         light. Returns an (H, W, 3) uint8 RGB array.
         """
         import matplotlib.pyplot as plt
-        from matplotlib.patches import ConnectionPatch
+        from matplotlib.patches import ConnectionPatch, Patch
         from romatch.utils.utils import get_gt_warp          # authoritative warp, directly imported
         from vision_core.viz import panel_grid, figure_to_ndarray
 
@@ -262,9 +268,25 @@ class OptFlowSample(SerializableSample):
             if cand:
                 rows.append((cls, x2, prob, cand))
 
-        fig, axes = panel_grid(2 * max(len(rows), 1), cols=2, panel_w=5.0, panel_h=4.0)   # [ref | obs] per class
+        def draw_id_mask(ax, mask, id_to_label, name):                   # discrete id mask + legend
+            ids = [int(i) for i in np.unique(mask) if i != 0]            # 0 = background
+            rgb = np.zeros((*mask.shape, 3))
+            handles = []
+            for k, i in enumerate(ids):
+                c = plt.cm.tab20(k % 20)[:3]
+                rgb[mask == i] = c
+                handles.append(Patch(color=c, label=f"{i}: {id_to_label.get(i, '?')}"))
+            ax.imshow(rgb)
+            ax.set_title(name, fontsize=8)
+            ax.axis("off")
+            if handles:
+                ax.legend(handles=handles, fontsize=6, loc="upper right", framealpha=0.7)
+
+        fig, axes = panel_grid(2 + 2 * len(rows), cols=2, panel_w=5.0, panel_h=4.0)   # [cid|iid] masks, then [ref|obs] per class
+        draw_id_mask(axes[0], self.cid_mask.numpy(), md.cid_to_class, "cid_mask")
+        draw_id_mask(axes[1], self.iid_mask.numpy(), md.iid_to_name, "iid_mask")
         for r, (cls, x2, prob, cand) in enumerate(rows):
-            ax_ref, ax_obs = axes[2 * r], axes[2 * r + 1]
+            ax_ref, ax_obs = axes[2 + 2 * r], axes[2 + 2 * r + 1]
             ax_ref.imshow(md.class_to_reference[cls].permute(1, 2, 0).numpy()[..., :3])
             ax_obs.imshow(obs)
             ax_ref.set_title(f"{cls} ref", fontsize=8)
@@ -310,6 +332,8 @@ class OptFlowMetadata(SerializableSample):
     class_to_ref_intrinsics: dict    # {class → torch.Tensor (3, 3)} reference K
     class_to_ref_pose: dict          # {class → torch.Tensor (4, 4)} camera2local SE3, OpenCV
     class_to_l2w: dict               # {class → torch.Tensor (N, 4, 4)} the class's N instance placements
+    cid_to_class: dict               # {cid: int → class name: str}; pairs with OptFlowSample.cid_mask
+    iid_to_name: dict                # {iid: int → instance name: str}; session-local
 
     # obs_intrinsics → .npy (base np.ndarray); every class_to_* dict → one .pt (torch.save).
     _serializers = {**SerializableSample._serializers, **_DICT_PT_SERIALIZER}

@@ -11,9 +11,9 @@ placement) are written once via ``finalize_metadata`` as one ``OptFlowMetadata``
 ``ObsMaskMetadata`` paradigm (``reference_seg_writer.ObsMaskWriter.finalize_metadata``), so the
 reference depth is stored once per render dir rather than duplicated into every frame.
 
-No instance-segmentation annotator: object↔frame pairing and the off-object mask are recovered
-downstream by the trainer's covisibility warp, not an obs id-map. Annotators: ``rgb``,
-``distance_to_image_plane``, ``camera_params``.
+Annotators: ``rgb``, ``distance_to_image_plane``, ``camera_params``, and
+``instance_segmentation_fast`` — the per-frame cid/iid masks (same encoding as ``ObsMask``) let the
+downstream UFM adapter split the 1-to-many warp into per-instance 1-to-1 pairs.
 """
 
 from collections import defaultdict
@@ -26,6 +26,7 @@ from torchvision import tv_tensors
 from omni.replicator.core import AnnotatorRegistry, Writer
 
 from isaac_datagen.stereo_writer import camera_params_to_world2cam
+from isaac_datagen.isaac_utils import cid_iid_masks
 from isaac_datagen.objects import OptFlowSample, OptFlowMetadata
 
 
@@ -38,12 +39,22 @@ class OptFlowWriter(Writer):
             AnnotatorRegistry.get_annotator("rgb"),
             AnnotatorRegistry.get_annotator("distance_to_image_plane"),
             AnnotatorRegistry.get_annotator("camera_params"),
+            AnnotatorRegistry.get_annotator(
+                "instance_segmentation_fast",
+                init_params={"colorize": False},
+            ),
         ]
         self._objects = objects
         self._l2w = local2worlds
         self._obs_K = obs_intrinsics
         self._render_dir = Path(render_dir)
         self._frame_id = 0
+
+        # Deterministic cids from the SORTED class set, starting at 2 (matches ObsMaskWriter).
+        classes = sorted({o.meta["class"] for o in objects})
+        self.class_to_cid = {cls: cid for cid, cls in enumerate(classes, start=2)}
+        self.cid_to_class = {cid: cls for cls, cid in self.class_to_cid.items()}
+        self.iid_to_name: dict[int, str] = {}   # accumulated per frame (iids are session-local)
 
     def attach(self, *rps):
         # ZED is stereo — capture_session passes both RPs; keep the LEFT one only
@@ -56,8 +67,18 @@ class OptFlowWriter(Writer):
         obs = tv_tensors.Image(torch.from_numpy(rp["rgb"]["data"][:, :, :3].copy()).permute(2, 0, 1))
         depth = np.asarray(rp["distance_to_image_plane"]["data"], dtype=np.float32)        # full frame
         cam2world = np.linalg.inv(camera_params_to_world2cam(rp["camera_params"]))         # OpenCV cam2world
+
+        seg_hw = rp["instance_segmentation_fast"]["data"]
+        labels = rp["instance_segmentation_fast"]["idToSemantics"]
+        iid_mask, cid_mask, frame_iid_to_name = cid_iid_masks(seg_hw, labels, self.class_to_cid)
+        if not frame_iid_to_name:
+            raise ValueError("write() called with no labeled instances — expected ≥1")
+        self.iid_to_name.update(frame_iid_to_name)
+
         OptFlowSample(
             observation=obs,
+            cid_mask=cid_mask,
+            iid_mask=iid_mask,
             observation_depth=depth,
             cam2world=cam2world.astype(np.float32),
         ).serialize(self._frame_id, self._render_dir)
@@ -84,4 +105,6 @@ class OptFlowWriter(Writer):
                 c: torch.from_numpy(np.stack([L for _, L in members])).float()
                 for c, members in by_class.items()
             },
+            cid_to_class=self.cid_to_class,
+            iid_to_name=self.iid_to_name,
         ).serialize(0, directory)
