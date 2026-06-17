@@ -2,7 +2,6 @@
 
 import os
 import shutil
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +17,7 @@ from vision_core.datastructs import SerializableSample, ReferenceSegSample, _DIC
 # isaacsim dependency — can import them too. Re-exported here for convenience.
 from vision_core.datastructs import ObsMask, PreReferenceSegSample, ObsMaskMetadata
 
-from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty, local_bbox_range
+from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty
 
 
 class UsdPath(str):
@@ -54,7 +53,7 @@ class GraspableObject(SerializableSample):
 
 
 @dataclass
-class PreOptFlowObject(SerializableSample):
+class OptFlowObject(SerializableSample):
     """A GraspableObject re-cast as a dense-optical-flow reference.
 
     The canonical RGB-D view of the object rendered from a grasp-anchored virtual camera,
@@ -92,15 +91,18 @@ class OptFlowSample(SerializableSample):
     # observation → .png (base tv_tensors.Image serializer); depth / cam2world → .npy (base np.ndarray).
     _serializers = SerializableSample._serializers
 
-    def visualize(self, md, *, name=None, points=None, n_points=12, rel=0.05, title=None) -> np.ndarray:
+    def visualize(self, md, *, cls_name=None, points=None, n_points=12, rel=0.05, title=None) -> np.ndarray:
         """GT reference→observation correspondence as labeled points, for eyeballing the warp.
 
+        One ``[ref | obs]`` row per class (pass ``cls_name`` to restrict to one). The class's single
+        canonical reference is warped — via RoMa's ``get_gt_warp`` (the exact warp the trainer uses)
+        — into EVERY instance of that class (1-to-many): reference candidates are numbered neutral
+        Xs on the left, and each instance fans out into the single obs panel in its own color, with
+        connection lines back to the shared reference point. Candidates occluded / out-of-view for a
+        given instance simply don't draw for it.
+
         Candidates are sampled ONLY where the reference has valid depth (``reference_depth>0``, on
-        the object) — numbered colored Xs in the reference (left), warped through RoMa's
-        ``get_gt_warp`` (the exact warp the trainer uses), and stamped with the SAME numbered X
-        where they land in the observation (right). Covisible candidates get a matched obs X;
-        candidates on the object but occluded / out-of-view show muted in the reference only.
-        Default candidates are a coarse grid over the valid-depth region; pass
+        the object): a coarse grid over the valid-depth region by default, or pass
         ``points=[(x, y), ...]`` (reference pixels, e.g. the grasp pixel) for specific coordinates.
 
         ``md`` is this render dir's ``OptFlowMetadata``. Requires ``romatch`` importable
@@ -117,16 +119,21 @@ class OptFlowSample(SerializableSample):
         dB = torch.as_tensor(self.observation_depth, dtype=torch.float32)
         K_B = torch.as_tensor(md.obs_intrinsics, dtype=torch.float32)
         rows = []
-        for nm in ([name] if name else list(md.name_to_reference)):
-            dA = md.name_to_reference_depth[nm].float()                               # (Ha, Wa)
-            T = (torch.as_tensor(np.linalg.inv(self.cam2world), dtype=torch.float32)
-                 @ md.name_to_local2world[nm].float() @ md.name_to_ref_pose[nm].float())  # ref-cam → obs-cam
-            x2, prob = get_gt_warp(dA[None], dB[None], T[None, :3],
-                                   md.name_to_ref_intrinsics[nm].float()[None], K_B[None],
-                                   relative_depth_error_threshold=rel)
-            x2 = x2[0].numpy()                                                         # (Ha, Wa, 2) warped coords
-            valid_ref = dA.numpy() > 0                                                 # ref pixels on the object
-            covis = (prob[0] > 0).numpy()                                             # subset also covisible in obs
+        for cls in ([cls_name] if cls_name else list(md.class_to_name)):     # iterate classes, 1-many
+            dA = md.class_to_reference_depth[cls].float()                    # (Ha, Wa) canonical ref depth
+            L = md.class_to_l2w[cls].float()                                 # (N, 4, 4) this class's placements
+            N = L.shape[0]
+            inv_c2w = torch.as_tensor(np.linalg.inv(self.cam2world), dtype=torch.float32)
+            T = torch.einsum('ij,njx,xy->niy', inv_c2w, L,                   # (N, 4, 4) ref-cam → obs-cam, per instance
+                             md.class_to_ref_pose[cls].float())
+            K_A = md.class_to_ref_intrinsics[cls].float()
+            x2, prob = get_gt_warp(                                          # batch = N: expand singletons to match T
+                dA[None].expand(N, -1, -1), dB[None].expand(N, -1, -1), T[:, :3],
+                K_A[None].expand(N, -1, -1), K_B[None].expand(N, -1, -1),
+                relative_depth_error_threshold=rel,
+            )
+            x2, prob = x2.numpy(), prob.numpy()                             # x2 (N,Ha,Wa,2) normalized, prob (N,Ha,Wa)
+            valid_ref = dA.numpy() > 0                                       # ref pixels on the object
             Ha, Wa = valid_ref.shape
             if points is not None:
                 pts = [(int(round(y)), int(round(x))) for x, y in points]
@@ -140,27 +147,28 @@ class OptFlowSample(SerializableSample):
                 gx = np.linspace(vx.min(), vx.max(), 5).astype(int)
                 cand = [(y, x) for y in gy for x in gx if valid_ref[y, x]][:n_points]
             if cand:
-                rows.append((nm, x2, covis, cand))
+                rows.append((cls, x2, prob, cand))
 
-        fig, axes = panel_grid(2 * max(len(rows), 1), cols=2, panel_w=5.0, panel_h=4.0)   # [ref, obs] per object
-        for r, (nm, x2, covis, cand) in enumerate(rows):
+        fig, axes = panel_grid(2 * max(len(rows), 1), cols=2, panel_w=5.0, panel_h=4.0)   # [ref | obs] per class
+        for r, (cls, x2, prob, cand) in enumerate(rows):
             ax_ref, ax_obs = axes[2 * r], axes[2 * r + 1]
-            ax_ref.imshow(md.name_to_reference[nm].permute(1, 2, 0).numpy()[..., :3])
+            ax_ref.imshow(md.class_to_reference[cls].permute(1, 2, 0).numpy()[..., :3])
             ax_obs.imshow(obs)
-            ax_ref.set_title(f"{nm} ref", fontsize=8)
-            ax_obs.set_title("obs", fontsize=8)
-            for i, (y, x) in enumerate(cand):
-                c = plt.cm.turbo(i / max(len(cand) - 1, 1))
-                seen = bool(covis[y, x])                                               # covisible → valid obs landing
-                ax_ref.plot(x, y, "x", ms=9, mew=2, color=c, alpha=1.0 if seen else 0.3)
-                ax_ref.text(x + 3, y - 3, str(i), color=c, fontsize=8, alpha=1.0 if seen else 0.3)
-                if not seen:                                                           # on object but occluded/out-of-view
-                    continue
-                ub, vb = (x2[y, x, 0] + 1) * Wb / 2, (x2[y, x, 1] + 1) * Hb / 2         # denormalize → obs px
-                ax_obs.plot(ub, vb, "x", ms=9, mew=2, color=c)
-                ax_obs.text(ub + 3, vb - 3, str(i), color=c, fontsize=8)
-                fig.add_artist(ConnectionPatch((ub, vb), (x, y), "data", "data",
-                                               axesA=ax_obs, axesB=ax_ref, color=c, lw=0.5, alpha=0.5))
+            ax_ref.set_title(f"{cls} ref", fontsize=8)
+            ax_obs.set_title(f"obs · {x2.shape[0]} instances", fontsize=8)
+            for i, (y, x) in enumerate(cand):                              # shared reference candidates (neutral)
+                ax_ref.plot(x, y, "x", ms=9, mew=2, color="k")
+                ax_ref.text(x + 3, y - 3, str(i), color="k", fontsize=8)
+            for n in range(x2.shape[0]):                                   # one color per instance → fan-out
+                c = plt.cm.turbo(n / max(x2.shape[0] - 1, 1))
+                for i, (y, x) in enumerate(cand):
+                    if prob[n, y, x] <= 0:                                 # occluded / out-of-view for this instance
+                        continue
+                    ub, vb = (x2[n, y, x, 0] + 1) * Wb / 2, (x2[n, y, x, 1] + 1) * Hb / 2
+                    ax_obs.plot(ub, vb, "x", ms=8, mew=2, color=c)
+                    ax_obs.text(ub + 3, vb - 3, str(i), color=c, fontsize=7)
+                    fig.add_artist(ConnectionPatch((ub, vb), (x, y), "data", "data",
+                                                   axesA=ax_obs, axesB=ax_ref, color=c, lw=0.5, alpha=0.4))
             ax_ref.axis("off")
             ax_obs.axis("off")
         if title:
@@ -172,24 +180,25 @@ class OptFlowSample(SerializableSample):
 class OptFlowMetadata(SerializableSample):
     """Per-render-dir catalog of the optical-flow dataset, serialized once (at idx=0).
 
-    The constants shared across every frame of a render dir: the observation intrinsics and,
-    per placed object (keyed by ``meta["name"]``), its reference RGB, reference metric depth,
-    reference intrinsics, reference camera2local pose (OpenCV), and its world placement
-    (``local2world``). Mirrors ``ObsMaskMetadata``: every per-object collection is a plain dict,
-    ``torch.save``d once via ``_DICT_PT_SERIALIZER`` (preserves str keys + Image/Tensor values),
-    so the reference depth is stored once rather than duplicated into every frame.
+    Keyed BY CLASS, not instance. Each class owns one canonical reference (RGB, metric depth,
+    intrinsics, camera2local pose) plus the world placements of ALL its instances in this render
+    dir — the 1-to-many contract: one reference depth map warps into every same-class instance.
+    Mirrors ``ObsMaskMetadata``: every per-class collection is a plain dict ``torch.save``d once
+    via ``_DICT_PT_SERIALIZER`` (preserves str keys + Image/Tensor values), so the reference
+    depth is stored once rather than duplicated into every frame.
 
-    The trainer adapter (Plan 3) composes each (reference, observation) pair's relative pose as
-    ``T_ref→obs = inv(cam2world) @ local2world @ ref_pose`` (all OpenCV).
+    The trainer warps the one reference into each instance ``n`` of class ``cls`` via
+    ``T_ref→obs[n] = inv(cam2world) @ class_to_l2w[cls][n] @ class_to_ref_pose[cls]`` (all OpenCV).
     """
     obs_intrinsics: np.ndarray       # (3, 3) observation K (shared)
-    name_to_reference: dict          # {name → tv_tensors.Image (3, H, W)} reference RGB
-    name_to_reference_depth: dict    # {name → torch.Tensor (H, W)} metric z-depth, 0 off-object
-    name_to_ref_intrinsics: dict     # {name → torch.Tensor (3, 3)} reference K
-    name_to_ref_pose: dict           # {name → torch.Tensor (4, 4)} camera2local SE3, OpenCV
-    name_to_local2world: dict        # {name → torch.Tensor (4, 4)} placed-object world pose
+    class_to_name: dict              # {class → list[str]} instance names, aligned to class_to_l2w rows
+    class_to_reference: dict         # {class → tv_tensors.Image (3, H, W)} canonical reference RGB
+    class_to_reference_depth: dict   # {class → torch.Tensor (Ha, Wa)} metric z-depth, 0 off-object
+    class_to_ref_intrinsics: dict    # {class → torch.Tensor (3, 3)} reference K
+    class_to_ref_pose: dict          # {class → torch.Tensor (4, 4)} camera2local SE3, OpenCV
+    class_to_l2w: dict               # {class → torch.Tensor (N, 4, 4)} the class's N instance placements
 
-    # obs_intrinsics → .npy (base np.ndarray); every name_to_* dict → one .pt (torch.save).
+    # obs_intrinsics → .npy (base np.ndarray); every class_to_* dict → one .pt (torch.save).
     _serializers = {**SerializableSample._serializers, **_DICT_PT_SERIALIZER}
 
 
@@ -374,88 +383,6 @@ class OccupancyGrid:
             path: (self.is_front(*coord) and self.is_top(*coord))
             for path, coord in self._placed.items()
         }
-
-
-class UntilExhaustedStacker:
-
-    EPSILON = 0.002
-
-    def __init__(self, prim_paths, column_height):
-        if column_height < 1:
-            raise ValueError(f"column_height must be >= 1, got {column_height}")
-        if len(prim_paths) < 1:
-            raise ValueError("UntilExhaustedStacker needs >= 1 object")
-
-        from isaacsim.core.utils.stage import get_current_stage
-        stage = get_current_stage()
-
-        # Columns of prim paths (deques so the "top" is unambiguous: last pushed).
-        self.columns = [
-            deque(prim_paths[s:s + column_height])
-            for s in range(0, len(prim_paths), column_height)
-        ]
-
-        # Measure size + center per prim once, from the loaded stage prims.
-        size, center = {}, {}
-        for p in prim_paths:
-            rng = local_bbox_range(stage.GetPrimAtPath(p))
-            sz, mid = rng.GetSize(), rng.GetMidpoint()
-            size[p] = (sz[0], sz[1], sz[2])
-            center[p] = (mid[0], mid[1], mid[2])
-
-        # Column footprint width = widest member's x-extent; center the wall on x=0.
-        col_widths = [max(size[p][0] for p in col) for col in self.columns]
-        total_w = sum(col_widths) + (len(self.columns) - 1) * self.EPSILON
-        left_edge = -total_w / 2.0
-
-        self._placements = {}  # prim_path -> (translation, rotation)
-        for col, col_w in zip(self.columns, col_widths):
-            col_x = left_edge + col_w / 2.0
-            floor_z = 0.0
-            for p in col:  # bottom -> top
-                sx, sy, sz = size[p]
-                cx, cy, cz = center[p]
-                # set_transform places the prim ORIGIN; the bbox center lands at
-                # origin + (cx,cy,cz), so subtract the midpoint per axis to seat
-                # the centroid on (col_x, 0) and the bbox base at floor_z.
-                translation = (col_x - cx, -cy, floor_z - cz + sz / 2.0)
-                self._placements[p] = (translation, (0.0, 0.0, 0.0))
-                floor_z += sz + self.EPSILON
-            left_edge += col_w + self.EPSILON
-
-    def __call__(self, prim_path):
-        return self._placements[prim_path]
-
-    def graspability(self):
-        """Per-prim-path graspability: only the top object of each column."""
-        tops = {col[-1] for col in self.columns if col}
-        return {p: (p in tops) for p in self._placements}
-
-
-class ShelfPlacer(UntilExhaustedStacker):
-    """UntilExhaustedStacker that groups same-class objects into the same columns.
-
-    Sorts prim_paths by their semantic "class" label (read off the loaded stage -- the
-    wrapper path encodes only the instance name) so each run of `column_height` adjacent
-    paths is one class: a shelf of cans next to a shelf of boxes. Layout/graspability are
-    inherited unchanged. Stable sort preserves within-class order; a class count not a
-    multiple of `column_height` yields one mixed boundary column, as with plain chunking.
-    """
-
-    def __init__(self, prim_paths, column_height):
-        from isaacsim.core.utils.semantics import get_labels
-        from isaacsim.core.utils.stage import get_current_stage
-
-        stage = get_current_stage()
-
-        def class_label(prim_path):
-            geo = stage.GetPrimAtPath(f"{prim_path}/geo")  # add_object labels geo as "class"
-            labels = get_labels(geo)
-            if not labels.get("class"):
-                raise ValueError(f"ShelfPlacer: no 'class' label on {prim_path}/geo")
-            return labels["class"][0]
-
-        super().__init__(sorted(prim_paths, key=class_label), column_height)
 
 
 class LoadedPallet:

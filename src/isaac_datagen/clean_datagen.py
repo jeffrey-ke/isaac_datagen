@@ -24,7 +24,7 @@ import yaml
 from isaac_datagen.scene import boot_sim, build_scene, make_replicator, warmup_render
 from isaac_datagen.capture import get_target2world, capture_with_poses, plan_capture
 from isaac_datagen.runtime_config import load_config
-from isaac_datagen.objects import GraspableObject, PreOptFlowObject
+from isaac_datagen.objects import GraspableObject, OptFlowObject
 from isaac_datagen.filters import filter_objects
 from isaac_datagen import posers
 from vision_core.seed_utils import seed_everything
@@ -54,22 +54,22 @@ def collect_objects(paths: list[str | Path]) -> list[GraspableObject]:
     return objects
 
 
-def collect_preoptflow(paths: list[str | Path]) -> list[PreOptFlowObject]:
-    """Deserialize every PreOptFlowObject from each dataset dir and concatenate.
+def collect_preoptflow(paths: list[str | Path]) -> list[OptFlowObject]:
+    """Deserialize every OptFlowObject from each dataset dir and concatenate.
 
     The optical-flow analog of collect_objects: same meta/ count idiom and the same
     globally-unique meta["name"] requirement (the name is the placed prim-path component
     in scene.add_object and the catalog join key in OptFlowMetadata)."""
-    objects: list[PreOptFlowObject] = []
+    objects: list[OptFlowObject] = []
     for p in paths:
         path = Path(p)
         n = len(sorted((path / "meta").glob("meta_*.yaml")))
-        objects.extend(PreOptFlowObject.deserialize(i, path) for i in range(n))
+        objects.extend(OptFlowObject.deserialize(i, path) for i in range(n))
 
     names = [o.meta["name"] for o in objects]
     dupes = sorted({n for n in names if names.count(n) > 1})
     if dupes:
-        raise ValueError(f"duplicate PreOptFlowObject names across datasets: {dupes}")
+        raise ValueError(f"duplicate OptFlowObject names across datasets: {dupes}")
     return objects
 
 
@@ -85,7 +85,7 @@ def reference_segmentation(runtime=None):
     from isaac_datagen.reference_seg_writer import ObsMaskWriter
 
     objects = filter_objects(
-            collect_objects(runtime.graspable_objects_path),
+            collect_objects(runtime.objects_path),
             runtime.filter_specs
     )
     scene = build_scene(runtime, objects)
@@ -120,7 +120,7 @@ def reference_segmentation(runtime=None):
 
 
 def optflow_generation(runtime=None):
-    """Optical-flow capture: place PreOptFlowObjects in clutter, capture per-frame
+    """Optical-flow capture: place OptFlowObjects in clutter, capture per-frame
     observation RGB-D + camera pose, and write the per-render constant catalog once.
 
     Mirrors reference_segmentation; plan_capture is reused purely as the camera-pose
@@ -138,7 +138,7 @@ def optflow_generation(runtime=None):
     from isaac_datagen.optflow_writer import OptFlowWriter
 
     objects = filter_objects(
-        collect_preoptflow(runtime.optflow_objects_path),
+        collect_preoptflow(runtime.objects_path),
         runtime.filter_specs,
     )
     scene = build_scene(runtime, objects)          # SceneHandle.object_prim_paths now populated

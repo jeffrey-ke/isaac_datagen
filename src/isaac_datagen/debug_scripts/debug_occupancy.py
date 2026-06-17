@@ -27,7 +27,7 @@ from isaac_datagen.objects import OccupancyGrid
 def main():
     cfg = yaml.safe_load(open(sys.argv[1]))
     dims = tuple(cfg["pallet_dims"])
-    gpath = cfg["graspable_objects_path"]
+    gpath = cfg["objects_path"]
 
     # Mirror clean_datagen.reference_segmentation: objects = collect_objects(...)
     metas = sorted(glob.glob(os.path.join(gpath, "meta", "meta_*.yaml")))

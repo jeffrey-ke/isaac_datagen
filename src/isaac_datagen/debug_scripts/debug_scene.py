@@ -51,7 +51,7 @@ def main():
     # Mirror reference_segmentation() exactly so the diagnosis is faithful: same seed
     # (global, via seed_everything), same build, same global np.random.choice for the
     # grasp picks — so the indices below match what the real run draws.
-    objects = collect_objects(runtime.graspable_objects_path)
+    objects = collect_objects(runtime.objects_path)
     scene = build_scene(runtime, objects)
 
     n = len(scene.grasp_points)

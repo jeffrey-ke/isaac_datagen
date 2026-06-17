@@ -16,6 +16,7 @@ downstream by the trainer's covisibility warp, not an obs id-map. Annotators: ``
 ``distance_to_image_plane``, ``camera_params``.
 """
 
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +31,7 @@ from isaac_datagen.objects import OptFlowSample, OptFlowMetadata
 
 class OptFlowWriter(Writer):
     def __init__(self, objects, local2worlds, obs_intrinsics, render_dir):
-        """objects: list[PreOptFlowObject] (== scene.objects). local2worlds: (M, 4, 4) world
+        """objects: list[OptFlowObject] (== scene.objects). local2worlds: (M, 4, 4) world
         poses aligned to ``objects`` (from get_target2world). obs_intrinsics: (3, 3) obs K."""
         self.data_structure = "renderProduct"
         self.annotators = [
@@ -65,15 +66,22 @@ class OptFlowWriter(Writer):
     def finalize_metadata(self, directory: str | Path | None = None):
         """Write the per-render-dir constants once (at idx=0). Call after capture."""
         directory = Path(directory) if directory is not None else self._render_dir
-        nm = lambda o: o.meta["name"]
+        by_class = defaultdict(list)                                   # class → [(object, l2w), ...]
+        for o, L in zip(self._objects, self._l2w):
+            by_class[o.meta["class"]].append((o, L))
+        rep = {c: members[0][0] for c, members in by_class.items()}    # representative object per class
         OptFlowMetadata(
             obs_intrinsics=np.asarray(self._obs_K, dtype=np.float32),
-            name_to_reference={
-                nm(o): tv_tensors.Image(torch.from_numpy(np.array(o.reference_image)).permute(2, 0, 1))
-                for o in self._objects
+            class_to_name={c: [o.meta["name"] for o, _ in members] for c, members in by_class.items()},
+            class_to_reference={
+                c: tv_tensors.Image(torch.from_numpy(np.array(o.reference_image)).permute(2, 0, 1))
+                for c, o in rep.items()
             },
-            name_to_reference_depth={nm(o): torch.from_numpy(o.reference_depth).float() for o in self._objects},
-            name_to_ref_intrinsics={nm(o): torch.from_numpy(o.ref_intrinsics).float() for o in self._objects},
-            name_to_ref_pose={nm(o): torch.from_numpy(o.ref_pose).float() for o in self._objects},
-            name_to_local2world={nm(o): torch.from_numpy(L).float() for o, L in zip(self._objects, self._l2w)},
+            class_to_reference_depth={c: torch.from_numpy(o.reference_depth).float() for c, o in rep.items()},
+            class_to_ref_intrinsics={c: torch.from_numpy(o.ref_intrinsics).float() for c, o in rep.items()},
+            class_to_ref_pose={c: torch.from_numpy(o.ref_pose).float() for c, o in rep.items()},
+            class_to_l2w={
+                c: torch.from_numpy(np.stack([L for _, L in members])).float()
+                for c, members in by_class.items()
+            },
         ).serialize(0, directory)

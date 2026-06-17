@@ -1,12 +1,11 @@
-idx: 0
-num_targets: 5
+idx: 17
+num_targets: 1
+num_frames: 5
 scene: empty
-dataset_dir: datasets/mixed-persp
 intrinsics_path: zed_K.npy
 placement: UntilExhaustedStacker
 placement_args:
   column_height: 5   # explicit — no hidden ctor default (was relying on RuntimeConfig's old default)
-num_frames: 25
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True
@@ -58,15 +57,24 @@ proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching
 proposer_max_occlusion: 0.25
 descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/descriptor.yaml
 
-graspable_objects_path: 
-  - /home/jeffk/repo/visual_servoing/datagen2_isaacsim/object_dataset_amazon
-  - /home/jeffk/repo/visual_servoing/datagen2_isaacsim/kleenex_dataset
-  - /home/jeffk/repo/isaac_datagen/datasets/ycb_dataset
+objects_path:
+  - /home/jeffk/repo/isaac_datagen/assets/optflow_objects/kleenex/
+  - /home/jeffk/repo/isaac_datagen/assets/optflow_objects/amazon/
+  - /home/jeffk/repo/isaac_datagen/assets/optflow_objects/ycb/
 
 obs_full_alpha: True
 filter_specs:
+  - name: RegexFilter
+    args: {key: class, value: 'cheezit|mustard|amazon_.*'}
   - name: ShuffleFilter
     args: 
       seed: ${idx}
   - name: MetaFilter
-    args: {key: name, value: 'amazon_*', max: 5}
+    args: {key: name, value: 'amazon_*', max: 1} # only one amazon object allowed, to remove amazon objects of
+                                                # different colors
+  - name: ReplicateFilter
+    args: {key: name, value: 'amazon_*', count: 5} # then duplicate that amazon object 5 times
+  - name: ReplicateFilter
+    args: {key: class, value: 'cheezit', count: 5}
+  - name: ReplicateFilter
+    args: {key: class, value: 'mustard', count: 5}
