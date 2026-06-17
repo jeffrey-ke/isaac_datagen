@@ -155,6 +155,33 @@ not anything about a specific light. (Side note: dome+distant lit frames came ou
 - **[GitHub IsaacSim #426]** "black renders when adding more objects"; canonical pattern is a warmup
   `step()` + `step(wait_for_render=True, rt_subframes=20)`. NVIDIA never reproduced; closed.
 
+### [GitHub IsaacSim #435 / Forum 355151] dome-in-`new_layer` intensity bug — RULED OUT for us (2026-06-16)
+
+NVIDIA-confirmed **5.1.0-specific** bug: a dome light **created inside `with rep.new_layer(): rep.create.light(...)`**
+has its intensity **ignored and reset to the schema default 1.0** (≈ black). Staff: *"Avoiding adding the
+new layer part seems to not trigger the issue in 5.1"* / *"please try avoiding rep.new_layer() when
+creating dome lights."* Workarounds: direct `UsdLux` (what we do) or `rep.functional.create.dome_light()`.
+**Fixed in 6.0.**
+
+This is NOT our bug, for two reasons:
+1. **We already use the workaround.** `make_dome_light` (`scene.py:207`) creates the dome via direct
+   `UsdLux.DomeLight` inside `build_scene` (`scene.py:410`) — *before* `rep.new_layer()` is ever entered
+   (only in `capture_session`, `capture.py:118`). Default `jitter_dome=False`, so nothing does
+   `rep.modify.attribute("intensity", …)` inside the layer; `register_background_jitter` touches only
+   `texture:file`. So the dome intensity is never authored or modified inside a rep layer.
+2. **Our renders prove intensity is honored.** The constant-dome sweep (renders 827–831, 823) is
+   *monotonic*: 3000/5500→0, 6500→234, 50000→252. If the renderer were stuck at the 1.0 fallback, 50000
+   would still be black. → the dome's authored intensity reaches the renderer.
+
+Caveat: the Bug-2 probe's `dome_I=1000` does NOT by itself disprove #435 — `GetIntensityAttr().Get()`
+reads the *composed USD attr* (always correct), not the renderer-effective intensity. It's the 827–831
+sweep (and the distant light *also* going dark per black process, renders 898–912 — distant is analytic,
+not subject to the dome bug) that rules #435 out. Our intermittent all-black is a broader per-process PT
+light-init race, not #435. Real fixes unchanged: detect-and-retry, or **upgrade to 6.0** (where #435 is
+gone and the init race may be too). `rt_subframes` is the fix for the *texture*-load dome bug
+([Forum 235328] white first frame, Andrei: "increasing the RTSubframes… could help with the material
+loading delay") — a different failure; we already run `rt_subframes=20` with no effect on the black.
+
 ---
 
 ## Key facts / gotchas discovered
