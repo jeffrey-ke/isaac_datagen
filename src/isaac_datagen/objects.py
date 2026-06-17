@@ -377,22 +377,6 @@ class OccupancyGrid:
 
 
 class UntilExhaustedStacker:
-    """Until-exhausted column stacker for HETEROGENEOUS object bounding boxes.
-
-    Chunks prim_paths into columns of <= column_height; each column stacks its
-    members base-to-base (bottom seated on the ground, each next object's base on
-    the previous object's top), centroids aligned on the column center-line and on
-    y=0. Column footprint width = the widest member's x-extent; columns abut
-    left->right with EPSILON gaps; the whole wall is centered on x=0. No physics
-    (a wider object may overhang a narrower one below). The last column may be
-    partial.
-
-    Unlike OccupancyGrid this MEASURES each loaded prim's bbox size AND center and
-    corrects for prim-origin-!=-bbox-center. The full layout is precomputed in
-    __init__; __call__ is a lookup.
-
-    Graspability: only the top (last-stacked) object of each column.
-    """
 
     EPSILON = 0.002
 

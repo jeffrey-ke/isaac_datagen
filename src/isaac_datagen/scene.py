@@ -11,7 +11,8 @@ from scipy.spatial.transform import Rotation as R
 
 from isaac_datagen.isaac_utils import load_asset, set_transform, bounding_half_extents, find_prims, create_empty
 from isaac_datagen.hardwares import ZedMini
-from isaac_datagen.objects import OccupancyGrid, UntilExhaustedStacker, GraspableObject
+from isaac_datagen.objects import GraspableObject
+from isaac_datagen import placers
 from isaac_datagen.pose_planning import plan_poses
 
 
@@ -26,12 +27,6 @@ class SceneHandle:
 
 RESOURCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
 
-
-def bbox_size_of(prim_path):
-    from isaacsim.core.utils.stage import get_current_stage
-    prim = get_current_stage().GetPrimAtPath(prim_path)
-    hx, hy, hz = bounding_half_extents(prim)
-    return (2 * hx, 2 * hy, 2 * hz)
 
 def add_object(*, at_parent: str, obj: GraspableObject) -> str:
     # Wrap the reference: Isaac Sim's transform path ignores xformOps authored
@@ -68,31 +63,8 @@ def create_stack_of_objects(parent_path, objects: List[GraspableObject], runtime
     stack_prim = create_prim(f"{parent_path}/stack", "Xform")
     stack_path = stack_prim.GetPath().pathString
 
-    if runtime.placement == "occupancy_grid":
-        # STATIC FULL-WALL policy: the grid is all-ones, so every slot must
-        # receive a box -- otherwise is_top/is_graspable describe phantom boxes
-        # that were never placed. Enforce enough objects to fill the wall.
-        dims = runtime.pallet_dims
-        capacity = dims[0] * dims[1] * dims[2]
-        if len(objects) < capacity:
-            raise ValueError(
-                f"create_stack_of_objects: full-wall pallet {tuple(dims)} needs {capacity} "
-                f"objects, got {len(objects)}. Supply more objects or shrink pallet_dims."
-            )
-        prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects[:capacity]]
-        # Uniform-box policy: cell size taken from the first object's bbox.
-        policy = OccupancyGrid(dims, bbox_size_of(prim_paths_added[0]))
-
-    elif runtime.placement == "until_exhausted_stacker":
-        # Heterogeneous policy: places ALL objects in columns of <= column_height.
-        if len(objects) < 1:
-            raise ValueError("until_exhausted_stacker needs >= 1 object")
-        prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects]
-        # Built AFTER add_object so it can measure each prim's bbox from the stage.
-        policy = UntilExhaustedStacker(prim_paths_added, runtime.column_height)
-
-    else:
-        raise ValueError(f"unknown placement policy: {runtime.placement!r}")
+    prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects]
+    policy = placers.get(runtime.placement)(prim_paths_added, **runtime.placement_args)
 
     organize_objects(policy=policy, prim_paths=prim_paths_added)
     is_graspable = policy.graspability()

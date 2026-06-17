@@ -62,7 +62,8 @@ def main():
     sel_t2w = get_target2world(selected)                  # (num_targets, 4, 4)
 
     lines = []
-    lines.append(f"pallet_dims          = {runtime.pallet_dims}  (capacity = {int(np.prod(runtime.pallet_dims))})")
+    cap = int(np.prod(runtime.pallet_dims)) if runtime.pallet_dims else "n/a"
+    lines.append(f"pallet_dims          = {runtime.pallet_dims}  (capacity = {cap})")
     lines.append(f"objects passed       = {len(objects)}  (collect_objects(...))")
     lines.append(f"num_targets (config) = {runtime.num_targets}")
     lines.append(f"len(grasp_points)    = {n}")

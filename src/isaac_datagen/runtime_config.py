@@ -36,12 +36,10 @@ class RuntimeConfig:
     proposer_config_path: str
     descriptor_config_path: str
 
-    # Object placement policy: "occupancy_grid" (static full-wall, uniform boxes,
-    # requires exactly prod(pallet_dims) objects) or "until_exhausted_stacker"
-    # (heterogeneous bboxes, columns of <= column_height, requires >= 1 object).
+    # Object-placement policy: a class name from the placers.py registry, e.g.
+    # "UntilExhaustedStacker". Its ctor kwargs come from placement_args (below).
     # Required (no default) so a config can't silently get the wrong policy.
     placement: str
-    pallet_dims: tuple[int, int, int]
     dome_light: bool
 
     dry_run: bool
@@ -63,9 +61,6 @@ class RuntimeConfig:
     # Dry run (dotlist: dry_run=true): build the scene and plan poses exactly as the
     # real run, then export scene.usdz + baked debug cameras/grasp-axes and the planned
     # poses for offline (Blender) inspection — skipping the writer and RTX capture.
-
-    # until_exhausted_stacker only: max objects per vertical column.
-    column_height: int = 5
 
     # Phase-2 proposals: skip objects whose occlusion ratio is ≥ this. A class is
     # kept if its best-visible member passes; NaN (unknown) never passes.
@@ -98,6 +93,14 @@ class RuntimeConfig:
     yrange: tuple[float, float] = (-0.22, 0.22)
     zrange: tuple[float, float] = (0.01, 0.01)
     target_to_baseline_ypr_desired: tuple[float, float, float] = (90, 0, 90)
+
+    # Object-placement policy registry (placers.py): name a placer class in
+    # `placement`, pass its ctor kwargs here verbatim (mirrors pose_generation_policy
+    # / segmentation OptimConfig). e.g. {"column_height": 5} for UntilExhaustedStacker.
+    placement_args: dict = field(default_factory=dict)
+    # Legacy OccupancyGrid grid dims (i,j,k); no longer used by the live placement path
+    # (placers.py retired OccupancyGrid), still read by debug_scripts. Optional.
+    pallet_dims: tuple[int, int, int] | None = None
 
     # Pose-generation policy registry (posers.py): name a poser class, pass its
     # ctor kwargs verbatim. Mirrors segmentation OptimConfig (name + args).
@@ -192,9 +195,6 @@ class RuntimeConfig:
         assert self.start_frame >= 0 and (self.end_frame is None or self.end_frame > self.start_frame), \
             f"bad frame window [{self.start_frame}, {self.end_frame})"
         assert self.inlier_border_eps >= 0, f"inlier_border_eps must be ≥ 0: {self.inlier_border_eps}"
-        assert self.placement in ("occupancy_grid", "until_exhausted_stacker"), \
-            f"unknown placement policy: {self.placement!r}"
-        assert self.column_height >= 1, f"column_height must be >= 1: {self.column_height}"
         lo, hi = self.dome_intensity_range
         assert lo <= hi, f"dome_intensity_range must have lo<=hi: {(lo, hi)}"
         assert self.exposure_time > 0, f"exposure_time must be > 0: {self.exposure_time}"
