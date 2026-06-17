@@ -240,7 +240,8 @@ class OptFlowSample(SerializableSample):
                              md.class_to_ref_pose[cls].float())
             K_A = md.class_to_ref_intrinsics[cls].float()
             x2, prob = get_gt_warp(                                          # batch = N: expand singletons to match T
-                dA[None].expand(N, -1, -1), dB[None].expand(N, -1, -1), T[:, :3],
+                dA[None].expand(N, -1, -1), dB[None].expand(N, -1, -1), 
+                T[:, :3],
                 K_A[None].expand(N, -1, -1), K_B[None].expand(N, -1, -1),
                 relative_depth_error_threshold=rel,
             )
