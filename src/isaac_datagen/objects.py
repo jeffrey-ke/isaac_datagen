@@ -73,6 +73,118 @@ class OptFlowObject(SerializableSample):
     # Same field types as GraspableObject (UsdPath/PIL/dict + base np.ndarray) → reuse its table.
     _serializers = GraspableObject._serializers
 
+    def visualize(self, *, depth_cmap="turbo", cam_scale=None, show_mesh=True,
+                  mesh_alpha=None, max_faces=20000, title=None) -> np.ndarray:
+        """Multi-panel QA figure: reference RGB | colormapped reference depth | 3D ref-pose.
+
+        The 3D panel draws the object-local coordinate frame as an axes gizmo at the origin, the
+        actual ``usd_path`` mesh in its local-frame position (``show_mesh``), and ``ref_pose`` as a
+        wireframe camera (OpenCV +Z-forward). Caption lists all ``meta`` fields. Returns an
+        (H, W, 3) uint8 RGB array. matplotlib imported lazily.
+
+        ``show_mesh`` reads the .usdz geometry via ``pxr`` — run under ``uv run --with usd-core``
+        or a booted Isaac kit (pass ``show_mesh=False`` to skip)."""
+        import matplotlib.pyplot as plt
+        from vision_core.viz import (figure_to_ndarray, draw_frame_3d, draw_camera_3d,
+                                     draw_mesh_3d, set_3d_equal)
+
+        rgb = np.asarray(self.reference_image)[..., :3]
+        depth = np.asarray(self.reference_depth, dtype=np.float32)
+        H, W = depth.shape
+
+        fig = plt.figure(figsize=(15, 5))
+        ax_rgb = fig.add_subplot(1, 3, 1)
+        ax_rgb.imshow(rgb); ax_rgb.set_title("reference_image"); ax_rgb.axis("off")
+
+        ax_d = fig.add_subplot(1, 3, 2)
+        im = ax_d.imshow(np.ma.masked_equal(depth, 0.0), cmap=depth_cmap)   # 0 = off-object → masked
+        fig.colorbar(im, ax=ax_d, fraction=0.046, pad=0.04, label="metric depth (m)")
+        ax_d.set_title("reference_depth"); ax_d.axis("off")
+
+        ax3 = fig.add_subplot(1, 3, 3, projection="3d")
+        cam_C = self.ref_pose[:3, 3]
+        extent_pts = [np.zeros(3), cam_C]                                   # origin + camera center
+        if show_mesh:
+            pts, faces, face_rgb = self._load_mesh()                       # baked to object-local frame
+            a = mesh_alpha if mesh_alpha is not None else (1.0 if face_rgb is not None else 0.35)
+            draw_mesh_3d(ax3, pts, faces, facecolors=face_rgb, alpha=a, max_faces=max_faces)
+            extent_pts = [pts.min(0), pts.max(0), cam_C]                   # frame the mesh + camera
+        s = cam_scale if cam_scale is not None else 0.25 * float(np.linalg.norm(cam_C))
+        draw_frame_3d(ax3, scale=s)                                         # object-local frame at origin
+        draw_camera_3d(ax3, self.ref_pose, self.ref_intrinsics, W, H, scale=s)
+        set_3d_equal(ax3, np.vstack(extent_pts))
+        ax3.set_title("ref_pose (cam2local, OpenCV)"); ax3.set_xlabel("x"); ax3.set_ylabel("y")
+
+        caption = "   ".join(f"{k}: {v}" for k, v in self.meta.items())
+        fig.suptitle(f"{title}\n{caption}" if title else caption, fontsize=9)
+        fig.tight_layout()
+        return figure_to_ndarray(fig)
+
+    def _load_mesh(self):
+        """(points (N,3), faces (M,3), face_rgb (M,3) in [0,1] or None) for the ``usd_path`` mesh.
+
+        Geometry baked into the object-local frame (each mesh prim's points through its
+        local-to-world transform, n-gons fan-triangulated). ``face_rgb`` is per-FACE colour sampled
+        from the bound diffuse texture via the mesh's faceVarying ``st`` UVs — matplotlib can't
+        UV-texture a 3D surface, so appearance is approximated as one flat colour per triangle
+        (None if the mesh has no UVs or no bound texture). Same usdz-reading recipe as
+        ``correspondence/extract_mesh.py``. Reads the .usdz via ``pxr`` (needs
+        ``uv run --with usd-core ...`` or a booted Isaac kit)."""
+        import zipfile
+        from io import BytesIO
+        try:
+            from pxr import Usd, UsdGeom, UsdShade
+        except ImportError as e:
+            raise ImportError(
+                "OptFlowObject.visualize(show_mesh=True) reads the .usdz mesh and needs pxr — run "
+                "under `uv run --with usd-core ...` or a booted Isaac kit, or pass show_mesh=False."
+            ) from e
+
+        stage = Usd.Stage.Open(str(self.usd_path))
+        verts, tris, tri_uvs, voff = [], [], [], 0
+        for prim in stage.Traverse():
+            if not prim.IsA(UsdGeom.Mesh):
+                continue
+            m = UsdGeom.Mesh(prim)
+            l2w = np.array(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())).T
+            P = np.asarray(m.GetPointsAttr().Get(), dtype=np.float64)
+            P = (l2w @ np.c_[P, np.ones(len(P))].T).T[:, :3]               # → object-local frame
+            counts = np.asarray(m.GetFaceVertexCountsAttr().Get())
+            fidx = np.asarray(m.GetFaceVertexIndicesAttr().Get())
+            st = UsdGeom.PrimvarsAPI(prim).GetPrimvar("st")
+            st_vals = np.asarray(st.ComputeFlattened(), dtype=np.float64) if st else None  # faceVarying
+            o = 0
+            for c in counts:                                              # fan-triangulate n-gons
+                f = fidx[o:o + c]
+                for k in range(1, c - 1):
+                    tris.append([f[0] + voff, f[k] + voff, f[k + 1] + voff])
+                    if st_vals is not None:
+                        tri_uvs.append([st_vals[o], st_vals[o + k], st_vals[o + k + 1]])
+                o += c
+            verts.append(P); voff += len(P)
+        points, faces = np.vstack(verts), np.asarray(tris, np.int64)
+
+        face_rgb = None
+        if tri_uvs:                                                        # sample the bound diffuse texture
+            tex = None
+            for prim in stage.Traverse():
+                sh = UsdShade.Shader(prim) if prim.IsA(UsdShade.Shader) else None
+                if sh and "UVTexture" in (sh.GetShaderId() or ""):
+                    rel = sh.GetInput("file").Get().path.lstrip("@").lstrip("./")
+                    try:
+                        with zipfile.ZipFile(str(self.usd_path)) as z:
+                            tex = np.asarray(PILImage.open(BytesIO(z.read(rel))).convert("RGB"))
+                    except KeyError:
+                        tex = None
+                    break
+            if tex is not None:
+                uv = np.asarray(tri_uvs).mean(1)                          # (M, 2) mean UV per triangle
+                Ht, Wt = tex.shape[:2]
+                u = np.clip(uv[:, 0], 0, 1) * (Wt - 1)
+                v = (1.0 - np.clip(uv[:, 1], 0, 1)) * (Ht - 1)            # st is bottom-left; image is top-left
+                face_rgb = tex[v.astype(int), u.astype(int)].astype(np.float64) / 255.0
+        return points, faces, face_rgb
+
 
 @dataclass
 class OptFlowSample(SerializableSample):
