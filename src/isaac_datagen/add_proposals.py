@@ -28,6 +28,7 @@ import torch
 from tqdm import tqdm
 
 from vision_core.datastructs import ObsMask, ObsMaskMetadata, PreReferenceSegSample
+from vision_core.seed_utils import seed_everything
 from isaac_datagen.runtime_config import load_config
 
 
@@ -70,6 +71,7 @@ def main():
     for idx in bar:
         if idx in done:
             continue
+        seed_everything(runtime.effective_seed + idx)   # per-frame: sharding-invariant RNG
         om = ObsMask.deserialize(idx, render_dir)
         present_iids = {int(i) for i in om.iid_mask.unique().tolist()} & set(md.iid_to_name)
         # Occlusion gate (iid space, then join iid → name → class): a class is kept
