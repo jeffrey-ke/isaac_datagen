@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.scripts]
-# reference_segmentation is the primary (and only) datagen entry.
-isaac-datagen = "isaac_datagen.clean_datagen:reference_segmentation"
+# main() loads the config and dispatches on runtime.mode (reference_segmentation | optflow).
+isaac-datagen = "isaac_datagen.clean_datagen:main"
 # phase-2 (no Isaac): add proposer point-prompts onto a rendered ObsMask dataset.
 isaac-datagen-proposals = "isaac_datagen.add_proposals:main"
 # phase-2.5 (no Isaac): FPS-cap each class's proposals; run before inliers.
@@ -72,6 +72,7 @@ gim = { path = "../gim", editable = true }
 detectron2 = { index = "torch-packages-builder" }
 mask2former = { path = "../Mask2Former", editable = true }
 multiscaledeformableattention = { path = "../Mask2Former/mask2former/modeling/pixel_decoder/ops" }
+romatch = { path = "../RoMa", editable = true }
 
 # Isaac Sim and its omni*/kit* sub-deps are published on NVIDIA's index, not PyPI.
 # Non-explicit so it acts as an --extra-index-url fallback for those packages.
@@ -87,3 +88,8 @@ url = "https://pypi.nvidia.com"
 name = "torch-packages-builder"
 url = "https://miropsota.github.io/torch_packages_builder"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "romatch",
+]

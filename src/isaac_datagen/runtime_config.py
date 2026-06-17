@@ -178,6 +178,14 @@ class RuntimeConfig:
     # foreground, so the dataset contract is intact.
     obs_full_alpha: bool = False
 
+    # ── Optical-flow dataset (Plan 2) ────────────────────────────────────────
+    # mode selects the orchestrator in clean_datagen.main():
+    #   "reference_segmentation" (default, ObsMask dataset) or "optflow" (OptFlow dataset).
+    mode: str = "reference_segmentation"
+    # PreOptFlowObject dataset dir(s) the optflow orchestrator places + captures
+    # (mirrors graspable_objects_path). Required only when mode="optflow".
+    optflow_objects_path: list[str] = field(default_factory=list)
+
     def __post_init__(self):
         assert (self.num_frames is None) ^ (self.grid_dims is None), \
             "exactly one of num_frames / grid_dims must be set"
@@ -193,6 +201,9 @@ class RuntimeConfig:
         assert self.f_number > 0, f"f_number must be > 0: {self.f_number}"
         assert self.film_iso > 0, f"film_iso must be > 0: {self.film_iso}"
         assert self.rt_subframes >= 1, f"rt_subframes must be >= 1: {self.rt_subframes}"
+        assert self.mode in ("reference_segmentation", "optflow"), f"unknown mode: {self.mode!r}"
+        if self.mode == "optflow":
+            assert self.optflow_objects_path, "mode=optflow requires optflow_objects_path"
         assert Path(self.dataset_dir).exists(), f"dataset_dir missing: {self.dataset_dir}"
         assert Path(self.intrinsics_path).exists(), f"intrinsics_path missing: {self.intrinsics_path}"
         assert Path(self.proposer_config_path).exists(), f"proposer_config_path missing: {self.proposer_config_path}"

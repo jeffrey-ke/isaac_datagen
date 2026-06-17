@@ -10,17 +10,20 @@ Standalone Isaac Sim Replicator data-generation package for visual servoing.
 ## Project context: reference-prompted instance segmentation
 
 Four sibling repos — `vision_core`, `reference_matching`, `isaac_datagen`, `segmentation` — implement one
-system: **few-shot reference-prompted instance segmentation**. Given a single canonical reference image of
-a target object, segment that object in novel observation images; this is the perception front-end for
-visual servoing / robotic grasping.
+system: **goal-conditioned suction-grasp pose prediction from a single reference image**. The runtime
+input is **RGB-D** (a point-map, since camera intrinsics are known), one canonical reference image of the
+target object, and a **grasp-goal** specification. Stages 1–3 are a few-shot **reference-prompted instance
+segmentation** front-end — given the reference, segment the target in the observation; stage 4 then
+segments the point-cloud with that mask and predicts the **6-DoF pose of the desired grasp point** in the
+camera frame for a **suction-cup** end-effector. Target objects are box- or can-shaped.
 
-Inference is a three-stage pipeline, and the reference image conditions every stage:
+Inference is a four-stage pipeline; the reference image conditions every segmentation stage:
 
 ```
 reference image (one canonical shot per class)
   ├─→ [reference_matching descriptors] DIFT tokens / M2F·DIFT FPN volumes — condition stages 2 and 3
   ▼
-observation image
+observation RGB-D (point-map; intrinsics known)
   │ 1. propose  [reference_matching]  ALIKED/LightGlue or GIM ref↔obs matching → candidate (x,y)
   │             point prompts on the observation (>50% outliers)
   │ 2. verify   [segmentation/verifier — in progress]  point descriptors grid_sampled from FPN volumes
@@ -30,9 +33,14 @@ observation image
   │             of the reference's class?"), not match verification — no 2-view geometry downstream.
   │ 3. segment  [segmentation]  verified points → SAM prompt_encoder (SAM is brittle to outlier
   │             prompts — hence stage 2); reference features injected into the frozen image encoder
-  │             via GLIGEN/Flamingo-style tanh-gated cross-attention (GligenWrapper)
+  │             via GLIGEN/Flamingo-style tanh-gated cross-attention (GligenWrapper) → instance mask
+  │ 4. grasp    [in design; trained on isaac_datagen renders]  the mask segments the RGB-D
+  │             point-cloud; a grasp-goal spec (the desired grasp — e.g. an approach direction in
+  │             spherical coords about the object centroid, or a 2D pixel on the reference) conditions
+  │             a per-point heatmap over the object surface → hotspot = suction contact point, its
+  │             surface normal = approach direction → full 6-DoF pose
   ▼
-instance mask of the target object
+6-DoF suction-grasp pose of the goal-specified point, in the camera frame
 ```
 
 How the repos fit:
@@ -41,11 +49,14 @@ How the repos fit:
 |---|---|
 | `vision_core` | Shared library: the serializable sample datastructs that are the dataset contract between repos (`ObsMask`/`ObsMaskMetadata` → `PreReferenceSegSample` → `PreImageInlierSample`; `ReferenceSegSample`; `StereoSample`) plus mask/pose/viz/transform/config utilities. |
 | `reference_matching` | Stage-1 proposers plus the descriptor backbones for stages 2 and 3 (`M2FFpn`/`DiftFpn` volumes the verifier samples; `DiftDescriptor` tokens the gligen blocks consume). Library-only editable dep of both pipeline repos. |
-| `isaac_datagen` **(this repo)** | Isaac Sim Replicator synthetic data generation: renders the phased datasets that train both learned stages — `PreImageInlierSample` (phase-2 proposals + phase-3 union-mask inlier labels: a point on ANY same-class instance is an inlier) for the verifier, `ReferenceSegSample` for the SAM fine-tune. Hosts the verifier design pseudocode (`verifier`) and its design note (`.docs_claude/multiscale-point-descriptor.md`). |
+| `isaac_datagen` **(this repo)** | Isaac Sim Replicator synthetic data generation: renders the phased datasets that train both learned stages — `PreImageInlierSample` (phase-2 proposals + phase-3 union-mask inlier labels: a point on ANY same-class instance is an inlier) for the verifier, `ReferenceSegSample` for the SAM fine-tune. Hosts the verifier design pseudocode (`verifier`) and its design note (`.docs_claude/multiscale-point-descriptor.md`), and the stage-4 grasp-pose research note (`.docs_claude/grasp-pose-stage-research.md`); will render the grasp-pose training data. |
 | `segmentation` | Stage-3 training/eval: `GligenWrapper` installs gated cross-attention on a frozen point-prompted SAM; hermetic Lightning checkpoints. Also hosts the stage-2 verifier implementation (`segmentation/verifier/`). |
 
-Both learned stages (2 and 3) train from the same render dirs and condition on the same per-class
-reference descriptors (`ObsMaskMetadata.class_to_descriptors`).
+Both segmentation stages (2 and 3) train from the same render dirs and condition on the same per-class
+reference descriptors (`ObsMaskMetadata.class_to_descriptors`). The **stage-4 grasp-pose head**
+(suction-cup; goal-conditioned) is in design — it also trains on `isaac_datagen` renders, but conditions
+on the grasp-goal spec and the mask-segmented point-cloud rather than the reference descriptors. See the
+research note `isaac_datagen/.docs_claude/grasp-pose-stage-research.md`.
 
 ## Quick start
 
@@ -73,7 +84,7 @@ Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_da
 | `mesh_convert.py` | Build a `GraspableObject` dataset from arbitrary meshes (+ YCB download): stage candidate renders, then finalize winners | `convert`, `finalize`, `ycb_download` |
 | `mesh_blender.py` | Blender worker: mesh → `/World` usdz + 4 side-face ortho reference tiles | (run via `blender --background`) |
 
-External (sibling editable packages + heavy deps): `vision_core` (datastructs `SerializableSample`/`StereoSample`/`ReferenceSegSample`, `pose_utils`; source at `/home/jeffk/repo/vision_core/src/vision_core/`, `datastructs.py` is the dataset contract), `reference_matching` (DIFT `descriptor`, `proposal`; source at `/home/jeffk/repo/reference_matching/src/reference_matching/`), `isaacsim==5.1.0` + `omni.replicator.core`, `pxr`/USD, torch/torchvision. These editable deps import only inside the project venv — use `uv run` (plain `python3` has no venv).
+External (sibling editable packages + heavy deps): `vision_core` (datastructs `SerializableSample`/`StereoSample`/`ReferenceSegSample`, `pose_utils`; source at `/home/jeffk/repo/vision_core/src/vision_core/`, `datastructs.py` is the dataset contract — the (de)serialization routines `SerializableSample.deserialize`/`deserialize_field`/`serialize` live at `datastructs.py:120`/`:129`/`:99`, dispatching on the per-type `_serializers` table at `:68`; `GraspableObject` (datagen-side, `objects.py:28`) inherits `deserialize` and only extends that table — `GraspableObject.deserialize(idx, dir)` reads the `usd_path/`+`meta/`+`reference_image/`+`grasp_point/` subdirs of `object_dataset_amazon/`), `reference_matching` (DIFT `descriptor`, `proposal`; source at `/home/jeffk/repo/reference_matching/src/reference_matching/`), `isaacsim==5.1.0` + `omni.replicator.core`, `pxr`/USD, torch/torchvision. These editable deps import only inside the project venv — use `uv run` (plain `python3` has no venv).
 
 ## Data flow
 
@@ -91,6 +102,19 @@ build_scene → stage + workbench + lights + object stack (OccupancyGrid) + gras
 ```
 
 Capture mechanism: `capture_with_poses` → `capture_session` opens `rep.new_layer()`, attaches the writer to the camera's render products, uses `rep.trigger.on_frame()` to move the camera through the planned world poses and apply randomizers, steps the orchestrator once per frame, then `wait_until_complete()`. The writer's `write()` runs synchronously inside each render step (see `.docs_claude/` notes on render/write scheduling).
+
+## Viewing GraspableObject assets in open3d (`correspondence/`)
+
+Inspect a `GraspableObject`'s `.usdz` mesh + its `grasp_point` SE3 in open3d. **open3d cannot read USD/USDZ** (`read_triangle_mesh` → "unknown file extension"), so a two-stage, two-env pipeline converts to formats it can:
+
+- `correspondence/extract_mesh.py <dataset_dir> <data_dir> [idx]` — **Stage A**, run `uv run --with usd-core python …` (needs `vision_core` + standalone `pxr` from `usd-core`; plain `uv run` has no `pxr` unless a full kit boots). Batch-`GraspableObject.deserialize(idx, dataset_dir)` over every sample (counted from `usd_path/`) → pxr reads each usdz: bakes points to the object frame (`ComputeLocalToWorldTransform`), fan-triangulates n-gons, captures faceVarying `st` UVs aligned to those triangles, and pulls the bound `UsdUVTexture` PNG straight out of the usdz zip → dumps `_<name>.npz` + `<name>_texture.png` (names from `meta["name"]`) into `<data_dir>`.
+- **Stage B** (run `uvx --from open3d python …`; env-agnostic npz bridges the two venvs), two builders:
+  - `build_obj_axes.py <data_dir> <out_dir>` — **the per-object viewer artifact**: one self-contained **multi-material** `<name>.obj` (+`.mtl`+`<name>_tex.png`) per npz, carrying the textured object mesh (`map_Kd`) *and* baked origin + grasp coordinate axes as flat-color materials (`Kd`). Multi-material is what lets one OBJ show texture *and* colored axes; opens in any viewer.
+  - `build_ply.py <npz>` — single-object alternative: `<name>.ply` (grey mesh + frames, vertex-colored) **and** a single-material textured `<name>.obj`.
+  - **Do NOT flip UVs.** USD `st`, OBJ `vt`, and open3d `triangle_uvs` all use a **bottom-left** origin — pass `st` through verbatim. A `v → 1−v` flip *looks* harmless on box geometry (it just vertically mirrors within each face) but scrambles **atlas** textures (YCB), placing the label on the wrong region. Verify orientation against a non-box, atlas-textured mesh (e.g. the French's mustard bottle), not a box.
+- `correspondence/view.py` — installed on PATH as **`plyview`** (PEP-723 self-contained `uv run --script`; `uv` provisions open3d). `plyview FILE [--frame] [--grasp] [--wire] [--save PNG]`. **`.obj`/`.glb`/`.gltf` load via `read_triangle_model`** so per-part materials render (object texture + colored axes) — `read_triangle_mesh` would flatten them to one untextured material (everything black). Other files use the legacy path; `--frame`/`--grasp` add large *separate* frame geometries (axis len ~0.7×bbox-diag, so they clear the surface — a triad baked at the centroid hides inside the opaque mesh), `--grasp` reads the SE3 from sibling `_<name>.npz`, `--wire` renders edges so an interior frame shows through, `--save` renders offscreen (EGL headless; reuse one `OffscreenRenderer` per process — a second EGL context crashes).
+
+Appearance **is** recoverable — the "geometry only" limit is about a naive pxr point/face dump, not the asset: the usdz bundles the diffuse texture + UVs + a `UsdPreviewSurface`. Textures don't survive a USD *flatten* (UsdShade bindings are dropped — color is lost when re-importing a flattened usdz into Blender), but reading them directly off the bound `UsdUVTexture` does work.
 
 ## Where to look next
 

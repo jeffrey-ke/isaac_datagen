@@ -20,6 +20,9 @@ class SceneHandle:
     zed: ZedMini
     grasp_points: list
     objects: List[GraspableObject]
+    object_prim_paths: List[str] = None   # placed-object wrapper paths, aligned to `objects`
+                                          # (== create_stack_of_objects' prim_paths_added); used to
+                                          # read each object's local2world in the optflow orchestrator
 
 RESOURCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
 
@@ -453,4 +456,5 @@ def build_scene(runtime, objects: List[GraspableObject]):
     # rot = tuple(R.from_matrix(world_pose[:3, :3]).as_euler('xyz', degrees=True).tolist())
     # set_transform(zed.prim, translation=pos, rotation=rot)
 
-    return SceneHandle(zed=zed, objects=objects, grasp_points=grasp_frames_paths)
+    return SceneHandle(zed=zed, objects=objects, grasp_points=grasp_frames_paths,
+                       object_prim_paths=objects_paths)

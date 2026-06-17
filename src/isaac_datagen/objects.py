@@ -7,10 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import torch
 import yaml
 from PIL import Image as PILImage
+from torchvision import tv_tensors
 
-from vision_core.datastructs import SerializableSample, ReferenceSegSample
+from vision_core.datastructs import SerializableSample, ReferenceSegSample, _DICT_PT_SERIALIZER
 # ObsMask / PreReferenceSegSample / ObsMaskMetadata live in vision_core.datastructs
 # (the shared package) so the sibling `segmentation-train` env — which can't take an
 # isaacsim dependency — can import them too. Re-exported here for convenience.
@@ -49,6 +51,146 @@ class GraspableObject(SerializableSample):
             lambda p: yaml.safe_load(open(p)),
         ),
     }
+
+
+@dataclass
+class PreOptFlowObject(SerializableSample):
+    """A GraspableObject re-cast as a dense-optical-flow reference.
+
+    The canonical RGB-D view of the object rendered from a grasp-anchored virtual camera,
+    plus that camera's intrinsics and pose. ``grasp_point`` is dropped: its sole job —
+    defining the reference viewpoint — is now baked into ``ref_pose``. Produced offline by
+    ``optflow_render.py``; consumed by the capture writer (Plan 2) and the trainer adapter
+    (Plan 3), which compose ``ref_pose`` into the ref->obs warp, so it is stored in OpenCV
+    (+Z-forward) convention — NOT the OpenGL pose authored onto the Isaac camera prim.
+    """
+    usd_path: UsdPath                # path to a .usdz file; copied into dataset on serialize
+    meta: dict                       # must contain keys "name" and "class"
+    reference_image: PILImage.Image  # RGB of the canonical reference view
+    reference_depth: np.ndarray      # (H, W) float32 metric z-depth; 0 OUTSIDE the object
+    ref_intrinsics: np.ndarray       # (3, 3) reference-camera K
+    ref_pose: np.ndarray             # (4, 4) camera2local SE3, OpenCV (+Z-forward) convention
+
+    # Same field types as GraspableObject (UsdPath/PIL/dict + base np.ndarray) → reuse its table.
+    _serializers = GraspableObject._serializers
+
+
+@dataclass
+class OptFlowSample(SerializableSample):
+    """One rendered observation frame of the dense-optical-flow dataset.
+
+    The only per-frame-unique payload: the observation RGB, its FULL-frame metric depth (NOT
+    masked — the warp samples it only for the consistency/occlusion check, so workbench and
+    background depth are correct context, not noise), and the observation camera pose in OpenCV
+    (+Z-forward) convention. The per-render constants (each object's reference RGB-D, pose,
+    intrinsics, placement) live once-per-render-dir in ``OptFlowMetadata``.
+    """
+    observation: tv_tensors.Image    # (3, H, W) obs RGB
+    observation_depth: np.ndarray    # (H, W) float32 metric z-depth, full frame (distance_to_image_plane)
+    cam2world: np.ndarray            # (4, 4) obs camera2world SE3, OpenCV (+Z-forward)
+
+    # observation → .png (base tv_tensors.Image serializer); depth / cam2world → .npy (base np.ndarray).
+    _serializers = SerializableSample._serializers
+
+    def visualize(self, md, *, name=None, points=None, n_points=12, rel=0.05, title=None) -> np.ndarray:
+        """GT reference→observation correspondence as labeled points, for eyeballing the warp.
+
+        Candidates are sampled ONLY where the reference has valid depth (``reference_depth>0``, on
+        the object) — numbered colored Xs in the reference (left), warped through RoMa's
+        ``get_gt_warp`` (the exact warp the trainer uses), and stamped with the SAME numbered X
+        where they land in the observation (right). Covisible candidates get a matched obs X;
+        candidates on the object but occluded / out-of-view show muted in the reference only.
+        Default candidates are a coarse grid over the valid-depth region; pass
+        ``points=[(x, y), ...]`` (reference pixels, e.g. the grasp pixel) for specific coordinates.
+
+        ``md`` is this render dir's ``OptFlowMetadata``. Requires ``romatch`` importable
+        (dev/optional dep); matplotlib + romatch are imported lazily so importing this module stays
+        light. Returns an (H, W, 3) uint8 RGB array.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import ConnectionPatch
+        from romatch.utils.utils import get_gt_warp          # authoritative warp, directly imported
+        from vision_core.viz import panel_grid, figure_to_ndarray
+
+        obs = self.observation.permute(1, 2, 0).numpy()[..., :3]
+        Hb, Wb = obs.shape[:2]
+        dB = torch.as_tensor(self.observation_depth, dtype=torch.float32)
+        K_B = torch.as_tensor(md.obs_intrinsics, dtype=torch.float32)
+        rows = []
+        for nm in ([name] if name else list(md.name_to_reference)):
+            dA = md.name_to_reference_depth[nm].float()                               # (Ha, Wa)
+            T = (torch.as_tensor(np.linalg.inv(self.cam2world), dtype=torch.float32)
+                 @ md.name_to_local2world[nm].float() @ md.name_to_ref_pose[nm].float())  # ref-cam → obs-cam
+            x2, prob = get_gt_warp(dA[None], dB[None], T[None, :3],
+                                   md.name_to_ref_intrinsics[nm].float()[None], K_B[None],
+                                   relative_depth_error_threshold=rel)
+            x2 = x2[0].numpy()                                                         # (Ha, Wa, 2) warped coords
+            valid_ref = dA.numpy() > 0                                                 # ref pixels on the object
+            covis = (prob[0] > 0).numpy()                                             # subset also covisible in obs
+            Ha, Wa = valid_ref.shape
+            if points is not None:
+                pts = [(int(round(y)), int(round(x))) for x, y in points]
+                cand = [(yy, xx) for yy, xx in pts
+                        if 0 <= yy < Ha and 0 <= xx < Wa and valid_ref[yy, xx]]
+            else:
+                vy, vx = np.nonzero(valid_ref)
+                if not len(vy):
+                    continue
+                gy = np.linspace(vy.min(), vy.max(), 5).astype(int)
+                gx = np.linspace(vx.min(), vx.max(), 5).astype(int)
+                cand = [(y, x) for y in gy for x in gx if valid_ref[y, x]][:n_points]
+            if cand:
+                rows.append((nm, x2, covis, cand))
+
+        fig, axes = panel_grid(2 * max(len(rows), 1), cols=2, panel_w=5.0, panel_h=4.0)   # [ref, obs] per object
+        for r, (nm, x2, covis, cand) in enumerate(rows):
+            ax_ref, ax_obs = axes[2 * r], axes[2 * r + 1]
+            ax_ref.imshow(md.name_to_reference[nm].permute(1, 2, 0).numpy()[..., :3])
+            ax_obs.imshow(obs)
+            ax_ref.set_title(f"{nm} ref", fontsize=8)
+            ax_obs.set_title("obs", fontsize=8)
+            for i, (y, x) in enumerate(cand):
+                c = plt.cm.turbo(i / max(len(cand) - 1, 1))
+                seen = bool(covis[y, x])                                               # covisible → valid obs landing
+                ax_ref.plot(x, y, "x", ms=9, mew=2, color=c, alpha=1.0 if seen else 0.3)
+                ax_ref.text(x + 3, y - 3, str(i), color=c, fontsize=8, alpha=1.0 if seen else 0.3)
+                if not seen:                                                           # on object but occluded/out-of-view
+                    continue
+                ub, vb = (x2[y, x, 0] + 1) * Wb / 2, (x2[y, x, 1] + 1) * Hb / 2         # denormalize → obs px
+                ax_obs.plot(ub, vb, "x", ms=9, mew=2, color=c)
+                ax_obs.text(ub + 3, vb - 3, str(i), color=c, fontsize=8)
+                fig.add_artist(ConnectionPatch((ub, vb), (x, y), "data", "data",
+                                               axesA=ax_obs, axesB=ax_ref, color=c, lw=0.5, alpha=0.5))
+            ax_ref.axis("off")
+            ax_obs.axis("off")
+        if title:
+            fig.suptitle(title, fontsize=10)
+        return figure_to_ndarray(fig)
+
+
+@dataclass
+class OptFlowMetadata(SerializableSample):
+    """Per-render-dir catalog of the optical-flow dataset, serialized once (at idx=0).
+
+    The constants shared across every frame of a render dir: the observation intrinsics and,
+    per placed object (keyed by ``meta["name"]``), its reference RGB, reference metric depth,
+    reference intrinsics, reference camera2local pose (OpenCV), and its world placement
+    (``local2world``). Mirrors ``ObsMaskMetadata``: every per-object collection is a plain dict,
+    ``torch.save``d once via ``_DICT_PT_SERIALIZER`` (preserves str keys + Image/Tensor values),
+    so the reference depth is stored once rather than duplicated into every frame.
+
+    The trainer adapter (Plan 3) composes each (reference, observation) pair's relative pose as
+    ``T_ref→obs = inv(cam2world) @ local2world @ ref_pose`` (all OpenCV).
+    """
+    obs_intrinsics: np.ndarray       # (3, 3) observation K (shared)
+    name_to_reference: dict          # {name → tv_tensors.Image (3, H, W)} reference RGB
+    name_to_reference_depth: dict    # {name → torch.Tensor (H, W)} metric z-depth, 0 off-object
+    name_to_ref_intrinsics: dict     # {name → torch.Tensor (3, 3)} reference K
+    name_to_ref_pose: dict           # {name → torch.Tensor (4, 4)} camera2local SE3, OpenCV
+    name_to_local2world: dict        # {name → torch.Tensor (4, 4)} placed-object world pose
+
+    # obs_intrinsics → .npy (base np.ndarray); every name_to_* dict → one .pt (torch.save).
+    _serializers = {**SerializableSample._serializers, **_DICT_PT_SERIALIZER}
 
 
 SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
