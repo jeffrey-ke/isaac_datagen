@@ -1,0 +1,43 @@
+idx: 0
+num_targets: 51
+scene: empty
+dataset_dir: datasets/mixed
+intrinsics_path: zed_K.npy
+# Heterogeneous dataset: the until-exhausted column stacker (placers.py registry).
+placement: UntilExhaustedStacker
+placement_args:
+  column_height: 5
+num_frames: 5
+descriptor_device: cuda:1
+proposer_device: cuda:0
+dome_light: True
+
+# Phase-3 inliers: border margin (px) a proposal must keep inside its class union mask.
+inlier_border_eps: 2.0
+
+# Camera pose-sampling box in the TARGET frame (the "halo" around each grasp point).
+# Currently near-degenerate: x and z are fixed, only y varies (-0.22..0) -> poses fan
+# along one axis on one side instead of orbiting. Widen these for a fuller halo.
+xrange: [0.35, 0.85]
+yrange: [-0.42, 0.42]
+zrange: [-0.10, 0.10]
+
+# Pose-generation policy (posers.py registry). Ranges interpolate the halo box above.
+pose_generation_policy: GridFixedPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+  target_to_ego_ypr: ${target_to_baseline_ypr_desired}
+  random: true
+
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+
+# Was the single merged `combined_dataset/` (51 objects); now the three graspable
+# sets it combined — collect_objects chains them (collect-objects-chain-datasets).
+objects_path:
+  - ../../assets/graspable_objects/object_dataset_amazon/
+  - ../../assets/graspable_objects/kleenex_dataset/
+  - ../../assets/graspable_objects/ycb_graspable/
+

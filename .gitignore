@@ -9,3 +9,9 @@ wheels/
 # Virtual environments
 .venv
 *.exr
+
+# Heavy artifacts — synced via `art` (.artifacts.yaml); HF is the source of truth.
+# Anchored + slash-free so the bulk-storage symlink form is matched too.
+/assets
+/datasets
+/src/isaac_datagen/datasets

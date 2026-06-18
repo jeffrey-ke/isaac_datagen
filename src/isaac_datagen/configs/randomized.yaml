@@ -1,11 +1,11 @@
-idx: 17
-num_targets: 1
-num_frames: 5
+idx: 0
+num_targets: 3
+num_frames: 100
 scene: empty
 intrinsics_path: zed_K.npy
 placement: UntilExhaustedStacker
 placement_args:
-  column_height: 5   # explicit — no hidden ctor default (was relying on RuntimeConfig's old default)
+  column_height: 3   # explicit — no hidden ctor default (was relying on RuntimeConfig's old default)
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True
@@ -53,16 +53,25 @@ occluder_pose_policy_args:
   target_to_ego_ypr: [0,0,0]
 occluder_scale: 0.06
 
-proposer_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
-proposer_max_occlusion: 0.25
-descriptor_config_path: /home/jeffk/repo/reference_matching/src/reference_matching/configs/descriptor.yaml
+# Reference-free grid proposer (32x18 cell-center anchors): matcher-recall-independent
+# coverage for the verifier's PreImageInlierSample labels. add_proposals still runs it
+# once per visible class and keys by class, so phase 3 labels each grid against that
+# class's union mask. Grid ignores the reference; swap to random_proposal.yaml for
+# stochastic coverage. Tune num_w/num_h in the proposer config.
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/random_proposal.yaml
+
+# Raised from 0.25: grid coverage is matcher-independent, so emit anchors even for
+# heavily-occluded classes. 1.0 keeps any class with at least one visible pixel
+# (occlusion==1.0 fully-occluded and NaN-unknown still drop).
+proposer_max_occlusion: 1.0
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
 
 objects_path:
-  - /home/jeffk/repo/isaac_datagen/assets/optflow_objects/kleenex/
-  - /home/jeffk/repo/isaac_datagen/assets/optflow_objects/amazon/
-  - /home/jeffk/repo/isaac_datagen/assets/optflow_objects/ycb/
+  - ../../assets/optflow_objects/kleenex/
+  - ../../assets/optflow_objects/amazon/
+  - ../../assets/optflow_objects/ycb/
 
-obs_full_alpha: True
+obs_full_alpha: False
 filter_specs:
   - name: RegexFilter
     args: {key: class, value: 'cheezit|mustard|amazon_.*'}

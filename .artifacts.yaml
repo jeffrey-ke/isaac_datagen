@@ -1,0 +1,5 @@
+# Artifact registry for the `art` tool (~/dotfiles/bin/art). One HF repo per
+# namespace; `dir` resolves relative to THIS file (so it is cwd-independent).
+# isaac_datagen produces the sim renders (dataset) and owns the usdz inputs (asset).
+dataset: { repo: jeffke613/refseg-datasets, dir: src/isaac_datagen/datasets, require_name: true,  ignore: ["debug/**"] }
+asset:   { repo: jeffke613/refseg-assets,   dir: assets,                     require_name: false, ignore: ["ycb/**"] }
