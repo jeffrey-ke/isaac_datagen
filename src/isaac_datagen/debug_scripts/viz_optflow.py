@@ -33,7 +33,7 @@ def main():
     for cls, names in md.class_to_name.items():
         print(f"  {cls}: {len(names)} instances {names}")
 
-    n = len(sorted((args.render_dir / "observation").glob("observation_*.png")))
+    n = len(sorted((args.render_dir / "obs").glob("obs_*.png")))   # ObsMask.obs, nested flat in OptFlowSample
     idxs = [args.idx] if args.idx is not None else range(n)
 
     out_dir = args.out or args.render_dir / "viz"

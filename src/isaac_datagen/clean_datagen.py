@@ -120,8 +120,10 @@ def reference_segmentation(runtime=None):
 
 
 def optflow_generation(runtime=None):
-    """Optical-flow capture: place OptFlowObjects in clutter, capture per-frame
-    observation RGB-D + camera pose, and write the per-render constant catalog once.
+    """Optical-flow capture: place OptFlowObjects in clutter, capture per-frame RGB-D + camera
+    pose, and write the per-render constant catalog once. Each ``OptFlowSample`` nests a full
+    ``ObsMask`` (serialized flat) and ``OptFlowMetadata`` nests an ``ObsMaskMetadata``, so the
+    render dir is ALSO a reference-seg render dir consumable by run_pipeline phases 2 & 3.
 
     Mirrors reference_segmentation; plan_capture is reused purely as the camera-pose
     generator (it aims the rig at randomly chosen grasp frames — the observation captures
@@ -129,6 +131,10 @@ def optflow_generation(runtime=None):
     """
     if runtime is None:
         runtime = load_config(sys.argv[1], sys.argv[2:])
+    assert runtime.obs_full_alpha, (
+        "optflow mode nests an ObsMask whose obs feeds UFM — set obs_full_alpha=True so obsmask.obs "
+        "is the full (unmasked) frame, else the warp's observation would be instance-masked."
+    )
 
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     render_dir.mkdir(parents=True, exist_ok=True)
@@ -152,16 +158,21 @@ def optflow_generation(runtime=None):
         app.close()
         return
 
-    writer = OptFlowWriter(scene.objects, l2w, scene.zed.intrinsics, render_dir)  # obs K = zed.intrinsics
+    writer = OptFlowWriter(scene.objects, l2w, scene.zed.intrinsics, render_dir,
+                           runtime.descriptor_config_path, runtime.descriptor_device,
+                           full_alpha=runtime.obs_full_alpha)   # obs K = zed.intrinsics
     replicator = make_replicator(runtime, len(world_poses), render_dir)
     warmup_render(app, runtime.warmup_frames)      # settle RTX before the writer captures
     capture_with_poses(world_poses, writer, scene.zed, replicator, rt_subframes=runtime.rt_subframes)
 
-    # Write the per-render-dir constants (obs K + per-object reference RGB-D, pose, placement).
+    # Write the per-render-dir constants (nested ObsMaskMetadata + optflow per-class catalog).
     writer.finalize_metadata(render_dir)
 
     with open(render_dir / 'runtime.yaml', 'w') as f:
         yaml.safe_dump(asdict(runtime), f)
+    # Keep the dir self-describing (phases 2/3 don't read it, but mirrors reference_segmentation).
+    with open(render_dir / 'descriptor.yaml', 'w') as f:
+        yaml.safe_dump(yaml.safe_load(Path(runtime.descriptor_config_path).read_text()), f)
 
     app.close()
 

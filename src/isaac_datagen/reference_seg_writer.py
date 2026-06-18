@@ -83,6 +83,85 @@ def _occlusion_by_iid(occ, iid_to_labels, instance_mappings, present_iids) -> di
     return out
 
 
+def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
+    """The static per-class catalog both writers build identically (shared writer init).
+
+    Returns ``(class_to_cid, name_to_class, class_to_ref, class_to_descriptors)``. cids derive
+    from the SORTED class set (start=2, mirroring Isaac 0=BACKGROUND/1=UNLABELLED) so they are
+    deterministic across render dirs that place the same class subset; each render dir stays
+    self-describing via cid_to_class. One canonical reference per class (first member by sorted
+    name; same-class members are near-duplicate box fronts). ``class_to_descriptors`` are the
+    precomputed DIFT features (C, h, w) — the only NN forward, run once here so per-frame
+    ``write()`` stays NN-free.
+    """
+    classes = sorted({obj.meta["class"] for obj in object_specs})
+    class_to_cid = {cls: cid for cid, cls in enumerate(classes, start=2)}
+    name_to_class = {obj.meta["name"]: obj.meta["class"] for obj in object_specs}
+    class_to_ref: dict[str, tv_tensors.Image] = {}
+    for obj in sorted(object_specs, key=lambda o: o.meta["name"]):
+        class_to_ref.setdefault(obj.meta["class"], _pil_to_tv_rgba(obj.reference_image))
+
+    from reference_matching import descriptor as descriptor_module
+    descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
+    with torch.inference_mode():
+        class_to_descriptors = {
+            cls: descriptor(tv_rgba.unsqueeze(0).to(descriptor_device)).squeeze(0).cpu()
+            for cls, tv_rgba in class_to_ref.items()   # (C, h, w) spatial
+        }
+    del descriptor
+    return class_to_cid, name_to_class, class_to_ref, class_to_descriptors
+
+
+def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
+    """Build one ``ObsMask`` from a render product's annotator payload.
+
+    Returns ``(ObsMask, frame_iid_to_name)``: the per-frame RGBA observation + cid/iid masks +
+    per-instance occlusion, plus the ``{iid → instance name}`` this frame (for the caller's
+    session-local ``iid_to_name`` accumulation). Raises if the frame has no labeled instances.
+    """
+    rp = data["renderProducts"][rp_key]
+    seg_hw = rp["instance_segmentation_fast"]["data"]
+    labels = rp["instance_segmentation_fast"]["idToSemantics"]
+
+    iid_mask, cid_mask, frame_iid_to_name = cid_iid_masks(seg_hw, labels, class_to_cid)
+    if not frame_iid_to_name:
+        raise ValueError("write() called with no labeled instances — expected ≥1")
+
+    # Per-instance occlusion, keyed by the same iids as iid_mask (graspable iids present this frame).
+    from omni.syntheticdata.scripts import helpers
+    present_iids = {int(i) for i in np.unique(seg_hw)} & set(frame_iid_to_name)
+    iid_to_occlusion = _occlusion_by_iid(
+        rp["occlusion"]["data"],
+        rp["instance_segmentation_fast"]["idToLabels"],
+        helpers.get_instance_mappings(),
+        present_iids,
+    )
+
+    obs_rgba = composite_rgba(rp["rgb"]["data"][:, :, :3], seg_hw,
+                              frame_iid_to_name.keys(), full_alpha=full_alpha)
+    obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
+    return ObsMask(obs=obs, iid_mask=iid_mask, cid_mask=cid_mask,
+                   iid_to_occlusion=iid_to_occlusion), frame_iid_to_name
+
+
+def obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descriptors, iid_to_name):
+    """Build the per-render-dir ``ObsMaskMetadata`` from the static catalog + accumulated iids.
+
+    The shared PCA→RGB basis is fit over ALL classes' tokens (each (C,h,w) → (h*w, C), stacked —
+    the same ``flatten(1).T`` tokenization consumers read), so every class projects into
+    comparable colors. Mandatory ``ObsMaskMetadata`` field.
+    """
+    tokens = torch.cat([d.flatten(1).T for d in class_to_descriptors.values()], dim=0)
+    return ObsMaskMetadata(
+        iid_to_name=iid_to_name,
+        cid_to_class={cid: cls for cls, cid in class_to_cid.items()},
+        name_to_class=name_to_class,
+        class_to_ref=class_to_ref,
+        class_to_descriptors=class_to_descriptors,
+        principal_components=fit_pca_basis(tokens, n=3),
+    )
+
+
 class ObsMaskWriter(Writer):
     def __init__(
         self,
@@ -107,32 +186,10 @@ class ObsMaskWriter(Writer):
         self._frame_id = 0
         self._full_alpha = full_alpha
         self.iid_to_name: dict[int, str] = {}   # accumulated per frame (iids are session-local)
-
-        # Static class catalog. cids are deterministic across render dirs only because
-        # they derive from the SORTED class set of the scene's objects — a config that
-        # places a different subset shifts them; each render dir stays self-describing
-        # via cid_to_class. cids start at 2, mirroring Isaac's 0=BACKGROUND/1=UNLABELLED.
-        classes = sorted({obj.meta["class"] for obj in object_specs})
-        self.class_to_cid = {cls: cid for cid, cls in enumerate(classes, start=2)}
+        (self.class_to_cid, self.name_to_class,
+         self.class_to_ref, self.class_to_descriptors) = reference_catalog(
+            object_specs, descriptor_config_path, descriptor_device)
         self.cid_to_class = {cid: cls for cls, cid in self.class_to_cid.items()}
-        self.name_to_class = {obj.meta["name"]: obj.meta["class"] for obj in object_specs}
-
-        # One canonical reference per class: first member by sorted name (same-class
-        # members are near-duplicate box fronts by construction of the relabeling).
-        self.class_to_ref: dict[str, tv_tensors.Image] = {}
-        for obj in sorted(object_specs, key=lambda o: o.meta["name"]):
-            self.class_to_ref.setdefault(obj.meta["class"], _pil_to_tv_rgba(obj.reference_image))
-
-        # Precompute the constant reference DIFT features once (one per class),
-        # then drop the descriptor so per-frame write() stays NN-free.
-        from reference_matching import descriptor as descriptor_module
-        descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
-        with torch.inference_mode():
-            self.class_to_descriptors = {
-                cls: descriptor(tv_rgba.unsqueeze(0).to(descriptor_device)).squeeze(0).cpu()
-                for cls, tv_rgba in self.class_to_ref.items()   # (C, h, w) spatial
-            }
-        del descriptor
 
     def attach(self, *rps):
         rp = rps[0]
@@ -140,61 +197,14 @@ class ObsMaskWriter(Writer):
         super().attach([rp])
 
     def write(self, data: dict):
-        rp = data["renderProducts"][self._rp_key]
-        rgb_hw3 = rp["rgb"]["data"][:, :, :3]
-
-        # DEBUG probe (black-render investigation): does a black frame have zero
-        # radiance in the raw HDR buffer (→ scene/lighting/beauty-pass), or only
-        # in the post-tonemap LDR `rgb` (→ capture/tonemap)? Also log the dome
-        # light's actual intensity at capture time.
-        import omni.usd
-        from pxr import UsdLux
-        # _hdr = rp["HdrColor"]["data"] if "HdrColor" in rp else None
-        # _hmax = float(np.asarray(_hdr).max()) if _hdr is not None else None
-        # _dome = UsdLux.DomeLight.Get(omni.usd.get_context().get_stage(), "/World/DomeLight")
-        # _di = _dome.GetIntensityAttr().Get() if _dome and _dome.GetPrim().IsValid() else None
-        # print(f"[PROBE] f={self._frame_id} ldr_max={int(rgb_hw3.max())} hdr_max={_hmax} dome_I={_di}", flush=True)
-
-        seg_hw = rp["instance_segmentation_fast"]["data"]
-        labels = rp["instance_segmentation_fast"]["idToSemantics"]
-
-        iid_mask, cid_mask, frame_iid_to_name = cid_iid_masks(seg_hw, labels, self.class_to_cid)
-        if not frame_iid_to_name:
-            raise ValueError("write() called with no labeled instances — expected ≥1")
+        obsmask, frame_iid_to_name = obsmask_from_data(
+            data, self._rp_key, self.class_to_cid, full_alpha=self._full_alpha)
         self.iid_to_name.update(frame_iid_to_name)
-
-        # Per-instance occlusion, keyed by the same iids as iid_mask (graspable iids
-        # actually present this frame).
-        from omni.syntheticdata.scripts import helpers
-        present_iids = {int(i) for i in np.unique(seg_hw)} & set(frame_iid_to_name)
-        iid_to_occlusion = _occlusion_by_iid(
-            rp["occlusion"]["data"],
-            rp["instance_segmentation_fast"]["idToLabels"],
-            helpers.get_instance_mappings(),
-            present_iids,
-        )
-
-        obs_rgba = composite_rgba(rgb_hw3, seg_hw, frame_iid_to_name.keys(), full_alpha=self._full_alpha)
-        obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
-
-        ObsMask(obs=obs, iid_mask=iid_mask, cid_mask=cid_mask, iid_to_occlusion=iid_to_occlusion) \
-            .serialize(self._frame_id, self._render_dir)
+        obsmask.serialize(self._frame_id, self._render_dir)
         self._frame_id += 1
 
     def finalize_metadata(self, directory: str | Path | None = None):
         """Serialize the per-render-dir catalog once (at idx=0). Call after capture."""
         directory = Path(directory) if directory is not None else self._render_dir
-        # Shared PCA→RGB basis over ALL classes' tokens (each (C,h,w) → (h*w, C),
-        # stacked — the same flatten(1).T tokenization consumers read), so every
-        # class projects into comparable colors. Mandatory ObsMaskMetadata field.
-        tokens = torch.cat(
-            [d.flatten(1).T for d in self.class_to_descriptors.values()], dim=0
-        )
-        ObsMaskMetadata(
-            iid_to_name=self.iid_to_name,
-            cid_to_class=self.cid_to_class,
-            name_to_class=self.name_to_class,
-            class_to_ref=self.class_to_ref,
-            class_to_descriptors=self.class_to_descriptors,
-            principal_components=fit_pca_basis(tokens, n=3),
-        ).serialize(0, directory)
+        obsmask_metadata(self.class_to_cid, self.name_to_class, self.class_to_ref,
+                         self.class_to_descriptors, self.iid_to_name).serialize(0, directory)

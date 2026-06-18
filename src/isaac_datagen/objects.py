@@ -11,7 +11,7 @@ import yaml
 from PIL import Image as PILImage
 from torchvision import tv_tensors
 
-from vision_core.datastructs import SerializableSample, ReferenceSegSample, _DICT_PT_SERIALIZER
+from vision_core.datastructs import SerializableSample, _DICT_PT_SERIALIZER
 # ObsMask / PreReferenceSegSample / ObsMaskMetadata live in vision_core.datastructs
 # (the shared package) so the sibling `segmentation-train` env — which can't take an
 # isaacsim dependency — can import them too. Re-exported here for convenience.
@@ -190,23 +190,25 @@ class OptFlowObject(SerializableSample):
 class OptFlowSample(SerializableSample):
     """One rendered observation frame of the dense-optical-flow dataset.
 
-    The only per-frame-unique payload: the observation RGB, its FULL-frame metric depth (NOT
+    The per-frame-unique payload: an ``ObsMask`` (the RGBA observation + cid/iid masks +
+    per-instance occlusion — the seg pipeline's exact per-frame datastruct, serialized FLAT so
+    ``ObsMask.deserialize(idx, render_dir)`` reads it directly), its FULL-frame metric depth (NOT
     masked — the warp samples it only for the consistency/occlusion check, so workbench and
     background depth are correct context, not noise), and the observation camera pose in OpenCV
-    (+Z-forward) convention. The per-render constants (each object's reference RGB-D, pose,
-    intrinsics, placement) live once-per-render-dir in ``OptFlowMetadata``.
+    (+Z-forward) convention. The per-instance ``obsmask.iid_mask`` lets the UFM adapter isolate one
+    instance (mask out same-class siblings) for 1-to-1 flow. The per-render constants (each
+    object's reference RGB-D, pose, intrinsics, placement) live once-per-render-dir in
+    ``OptFlowMetadata``. ``obsmask.obs`` (RGBA) replaces the old ``observation`` RGB — read
+    ``obsmask.obs[:3]`` for the 3-channel frame (requires ``full_alpha=True`` at capture so it is
+    the full, unmasked frame).
     """
-    observation: tv_tensors.Image    # (3, H, W) obs RGB
-    cid_mask: tv_tensors.Mask
-    iid_mask: tv_tensors.Mask
+    obsmask: ObsMask                 # RGBA obs + cid/iid masks + occlusion; serialized FLAT (nested sample)
     observation_depth: np.ndarray    # (H, W) float32 metric z-depth, full frame (distance_to_image_plane)
     cam2world: np.ndarray            # (4, 4) obs camera2world SE3, OpenCV (+Z-forward)
 
-    # observation → .png; depth / cam2world → .npy; cid_mask / iid_mask → .npy.
-    _serializers = {
-        **SerializableSample._serializers,
-        **ReferenceSegSample._serializers,   # adds tv_tensors.Mask → .npy
-    }
+    # obsmask serializes its own subdirs flat (datastructs nested-sample rule); the two np.ndarray
+    # fields use the base serializer.
+    _serializers = SerializableSample._serializers
 
     def visualize(self, md, *, cls_name=None, points=None, n_points=12, rel=0.05, title=None) -> np.ndarray:
         """GT reference→observation correspondence as labeled points, for eyeballing the warp.
@@ -232,7 +234,7 @@ class OptFlowSample(SerializableSample):
         from romatch.utils.utils import get_gt_warp          # authoritative warp, directly imported
         from vision_core.viz import panel_grid, figure_to_ndarray
 
-        obs = self.observation.permute(1, 2, 0).numpy()[..., :3]
+        obs = self.obsmask.obs.permute(1, 2, 0).numpy()[..., :3]
         Hb, Wb = obs.shape[:2]
         dB = torch.as_tensor(self.observation_depth, dtype=torch.float32)
         K_B = torch.as_tensor(md.obs_intrinsics, dtype=torch.float32)
@@ -283,8 +285,8 @@ class OptFlowSample(SerializableSample):
                 ax.legend(handles=handles, fontsize=6, loc="upper right", framealpha=0.7)
 
         fig, axes = panel_grid(2 + 2 * len(rows), cols=2, panel_w=5.0, panel_h=4.0)   # [cid|iid] masks, then [ref|obs] per class
-        draw_id_mask(axes[0], self.cid_mask.numpy(), md.cid_to_class, "cid_mask")
-        draw_id_mask(axes[1], self.iid_mask.numpy(), md.iid_to_name, "iid_mask")
+        draw_id_mask(axes[0], self.obsmask.cid_mask.numpy(), md.obsmaskmeta.cid_to_class, "cid_mask")
+        draw_id_mask(axes[1], self.obsmask.iid_mask.numpy(), md.obsmaskmeta.iid_to_name, "iid_mask")
         for r, (cls, x2, prob, cand) in enumerate(rows):
             ax_ref, ax_obs = axes[2 + 2 * r], axes[2 + 2 * r + 1]
             ax_ref.imshow(md.class_to_reference[cls].permute(1, 2, 0).numpy()[..., :3])
@@ -325,6 +327,9 @@ class OptFlowMetadata(SerializableSample):
     The trainer warps the one reference into each instance ``n`` of class ``cls`` via
     ``T_ref→obs[n] = inv(cam2world) @ class_to_l2w[cls][n] @ class_to_ref_pose[cls]`` (all OpenCV).
     """
+    obsmaskmeta: ObsMaskMetadata     # the seg-pipeline catalog (cid_to_class/iid_to_name/name_to_class/
+                                     # class_to_ref/class_to_descriptors/principal_components), serialized
+                                     # FLAT; supplies cid_to_class (pairs with obsmask.cid_mask) + iid_to_name
     obs_intrinsics: np.ndarray       # (3, 3) observation K (shared)
     class_to_name: dict              # {class → list[str]} instance names, aligned to class_to_l2w rows
     class_to_reference: dict         # {class → tv_tensors.Image (3, H, W)} canonical reference RGB
@@ -332,10 +337,9 @@ class OptFlowMetadata(SerializableSample):
     class_to_ref_intrinsics: dict    # {class → torch.Tensor (3, 3)} reference K
     class_to_ref_pose: dict          # {class → torch.Tensor (4, 4)} camera2local SE3, OpenCV
     class_to_l2w: dict               # {class → torch.Tensor (N, 4, 4)} the class's N instance placements
-    cid_to_class: dict               # {cid: int → class name: str}; pairs with OptFlowSample.cid_mask
-    iid_to_name: dict                # {iid: int → instance name: str}; session-local
 
-    # obs_intrinsics → .npy (base np.ndarray); every class_to_* dict → one .pt (torch.save).
+    # obsmaskmeta serializes its own subdirs flat (nested-sample rule); obs_intrinsics → .npy
+    # (base np.ndarray); every class_to_* dict → one .pt (torch.save).
     _serializers = {**SerializableSample._serializers, **_DICT_PT_SERIALIZER}
 
 
