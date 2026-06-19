@@ -6,6 +6,10 @@ Phase 1 is skipped when the render dir already has obs/ frames — phases 2 and 
 are individually resumable, but re-rendering under an existing proposals/ would
 silently desync them. Delete the render dir to force a fresh render.
 
+After phase 1, every run validates cid/iid mask consistency (graspable iids on
+each frame must map to a class cid in cid_mask). On failure the pipeline exits
+before proposals/inliers.
+
 After a FRESH render, on an interactive terminal the pipeline prints a
 foreground-luminance / dark-frame summary (via isaac-datagen-measure-luminance)
 and pauses for a y/N confirmation, so you can catch junk (e.g. the intermittent
@@ -28,6 +32,7 @@ import sys
 from pathlib import Path
 
 from isaac_datagen.runtime_config import load_config
+from isaac_datagen.validate_obsmask import validate_render_dir, _format_orphan
 
 
 def _find(script: str) -> str:
@@ -101,12 +106,26 @@ def main():
 
     obs = render_dir / "obs"
     n_obs = len(list(obs.glob("obs_*.png"))) if obs.is_dir() else 0
+    fresh = not n_obs
     if n_obs:
         print(f"phase 1: {obs} already has {n_obs} frames — skipping render "
               f"(delete {render_dir} to re-render)", flush=True)
     else:
         _run("isaac-datagen", *sys.argv[1:])
         n_obs = len(list(obs.glob("obs_*.png")))
+
+    orphans = validate_render_dir(render_dir)
+    if orphans:
+        print(f"\ncid/iid validation failed: {len(orphans)} orphan row(s) in {render_dir}",
+              file=sys.stderr, flush=True)
+        for o in orphans[:20]:
+            print(f"  {_format_orphan(o)}", file=sys.stderr, flush=True)
+        if len(orphans) > 20:
+            print(f"  ... and {len(orphans) - 20} more", file=sys.stderr, flush=True)
+        sys.exit("fix cid_mask / re-render before proposals — "
+                 "run isaac-datagen-validate-obsmask for the full list")
+
+    if fresh:
         _confirm_or_abort(render_dir, n_obs)   # gate: inspect fresh render before downstream phases
 
     devices = runtime.proposer_devices or ()

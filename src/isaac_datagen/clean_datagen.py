@@ -79,6 +79,8 @@ def reference_segmentation(runtime=None):
 
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     render_dir.mkdir(parents=True, exist_ok=True)
+    from isaac_datagen import cid_iid_trace
+    cid_iid_trace.init(render_dir)
     seed_everything(runtime.effective_seed)        # seed = runtime.seed + runtime.idx; before boot_sim
     app = boot_sim(runtime, render_dir)
 
@@ -134,6 +136,8 @@ def optflow_generation(runtime=None):
 
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     render_dir.mkdir(parents=True, exist_ok=True)
+    from isaac_datagen import cid_iid_trace
+    cid_iid_trace.init(render_dir)
     seed_everything(runtime.effective_seed)        # before boot_sim
     app = boot_sim(runtime, render_dir)
 

@@ -48,6 +48,8 @@ isaac-datagen-viz-occlusion = "isaac_datagen.viz_occlusion:main"
 isaac-datagen-viz-sample = "isaac_datagen.viz_sample:main"
 # debug (no Isaac): catalog per-frame foreground luminance / dark frames (dark-box investigation).
 isaac-datagen-measure-luminance = "isaac_datagen.measure_luminance:main"
+# gate (no Isaac): per-frame cid/iid mask consistency after phase 1
+isaac-datagen-validate-obsmask = "isaac_datagen.validate_obsmask:main"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]

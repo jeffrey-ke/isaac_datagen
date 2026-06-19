@@ -186,6 +186,9 @@ class ObsMaskWriter(Writer):
         self._frame_id = 0
         self._full_alpha = full_alpha
         self.iid_to_name: dict[int, str] = {}   # accumulated per frame (iids are session-local)
+        from isaac_datagen import cid_iid_trace
+        if not cid_iid_trace.enabled():
+            cid_iid_trace.init(self._render_dir)
         (self.class_to_cid, self.name_to_class,
          self.class_to_ref, self.class_to_descriptors) = reference_catalog(
             object_specs, descriptor_config_path, descriptor_device)
