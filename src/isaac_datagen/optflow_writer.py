@@ -36,8 +36,9 @@ class OptFlowWriter(Writer):
     def __init__(self, objects, local2worlds, obs_intrinsics, render_dir,
                  descriptor_config_path, descriptor_device, full_alpha=False):
         """objects: list[OptFlowObject] (== scene.objects). local2worlds: (M, 4, 4) world poses
-        aligned to ``objects`` (from get_target2world). obs_intrinsics: (3, 3) obs K. The nested
-        ObsMask needs ``full_alpha=True`` so ``obsmask.obs`` is the full (unmasked) frame for UFM."""
+        aligned to ``objects`` (from get_target2world). obs_intrinsics: (3, 3) obs K. ``obsmask.obs`` is
+        RGBA whose alpha carries the instance foreground (full_alpha=False); the RGB channels are the full
+        frame regardless, and UFM reads RGB[:3], so the alpha never reaches the warp."""
         self.data_structure = "renderProduct"
         self.annotators = [
             AnnotatorRegistry.get_annotator("rgb"),

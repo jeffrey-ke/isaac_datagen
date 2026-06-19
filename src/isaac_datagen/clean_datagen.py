@@ -131,10 +131,6 @@ def optflow_generation(runtime=None):
     """
     if runtime is None:
         runtime = load_config(sys.argv[1], sys.argv[2:])
-    assert runtime.obs_full_alpha, (
-        "optflow mode nests an ObsMask whose obs feeds UFM — set obs_full_alpha=True so obsmask.obs "
-        "is the full (unmasked) frame, else the warp's observation would be instance-masked."
-    )
 
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     render_dir.mkdir(parents=True, exist_ok=True)
@@ -158,9 +154,13 @@ def optflow_generation(runtime=None):
         app.close()
         return
 
+    # obsmask.obs is RGBA whose alpha carries the instance foreground (full_alpha=False, recoverable
+    # straight off obs). The RGB channels are the full frame either way (composite_rgba never masks RGB;
+    # straight-alpha PNG preserves color under alpha==0), and the UFM adapter reads obs[:3], so the alpha
+    # never reaches the warp — no reason to blank it to 255.
     writer = OptFlowWriter(scene.objects, l2w, scene.zed.intrinsics, render_dir,
                            runtime.descriptor_config_path, runtime.descriptor_device,
-                           full_alpha=runtime.obs_full_alpha)   # obs K = zed.intrinsics
+                           full_alpha=False)   # obs K = zed.intrinsics
     replicator = make_replicator(runtime, len(world_poses), render_dir)
     warmup_render(app, runtime.warmup_frames)      # settle RTX before the writer captures
     capture_with_poses(world_poses, writer, scene.zed, replicator, rt_subframes=runtime.rt_subframes)

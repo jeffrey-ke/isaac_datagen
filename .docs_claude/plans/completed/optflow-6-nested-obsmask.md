@@ -38,6 +38,7 @@ shares them with zero duplication and no `only=` juggling.
    nests it; `finalize_metadata` nests `obsmask_metadata(...)`.
 5. **`clean_datagen.py`** — `optflow_generation` passes descriptor config + `full_alpha`, asserts
    `obs_full_alpha` (UFM needs the full unmasked frame), dumps `descriptor.yaml`.
+   **↳ REVERSED 2026-06-17 — see Correction below; the assert was removed and `full_alpha` pinned False.**
 6. **`debug_scripts/viz_optflow.py`** — frame-count glob `observation/` → `obs/`.
 
 ## Verification (run, all passed)
@@ -51,6 +52,26 @@ shares them with zero duplication and no `only=` juggling.
 - **Decisive:** `isaac-datagen-pipeline` phases 2 & 3 on render950 (phase 1 skipped) → `add_proposals`
   wrote 19,667 proposal points (`proposals/`), `add_inlier_data` labeled inliers (`labels/`, `stats/`).
   Exit 0.
+
+## Correction (2026-06-17) — the `obs_full_alpha=True` invariant was wrong, now removed
+
+Change 5 added `assert runtime.obs_full_alpha` with the rationale "UFM needs the full unmasked frame, else
+the warp's observation would be instance-masked." **That premise is false** — the observation UFM sees is
+never instance-masked by the alpha:
+
+- **`composite_rgba` only swaps the alpha channel** — `concat([rgb[:,:,:3], alpha])`. The RGB is the full
+  frame verbatim in BOTH branches; `full_alpha` does not touch color.
+- **Straight-alpha PNG preserves it** — the `tv_tensors.Image` serializer saves via PIL (non-premultiplied),
+  so RGB under `alpha==0` survives; deserialize reads back 4-channel `RGB_ALPHA`.
+- **UFM reads RGB, not alpha** — the optflow-3 adapter feeds RoMa/UFM `obs[:3]` (3-channel normalize would
+  error on 4 channels anyway), so the alpha value never reaches the warp. Per-instance isolation for the
+  1-to-1 flow comes from `iid_mask`, not the obs alpha ([[optflow-ufm-predicts-grasp]]).
+
+So forcing `full_alpha=True` only **blanked a useful alpha** (the instance foreground) to 255 for no
+benefit. **Fix:** `optflow_generation` now drops the assert and pins `full_alpha=False`, so `obsmask.obs` is
+a genuine RGBA whose alpha carries the foreground (the seg-native contract — phases 2/3 already consume that
+in reference-seg mode). The obs→UFM RGB contract now lives solely in the adapter's `obs[:3]` slice
+(optflow-3). `OptFlowWriter`'s docstring was corrected to match.
 
 ## Notes / accepted
 
