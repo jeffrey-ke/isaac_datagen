@@ -11,11 +11,14 @@ import yaml
 from PIL import Image as PILImage
 from torchvision import tv_tensors
 
-from vision_core.datastructs import SerializableSample, _DICT_PT_SERIALIZER
-# ObsMask / PreReferenceSegSample / ObsMaskMetadata live in vision_core.datastructs
-# (the shared package) so the sibling `segmentation-train` env — which can't take an
-# isaacsim dependency — can import them too. Re-exported here for convenience.
-from vision_core.datastructs import ObsMask, PreReferenceSegSample, ObsMaskMetadata
+from vision_core.datastructs import SerializableSample
+# ObsMask / PreReferenceSegSample / ObsMaskMetadata / OptFlowSample / OptFlowMetadata live in
+# vision_core.datastructs (the shared package) so sibling envs — `segmentation-train` and the
+# UFM trainer, which can't take an isaacsim dependency — can import them too. The OptFlow* pair is
+# the optflow dataset contract; re-exported here for convenience (e.g. optflow_writer.py).
+from vision_core.datastructs import (
+    ObsMask, PreReferenceSegSample, ObsMaskMetadata, OptFlowSample, OptFlowMetadata,
+)
 
 from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty
 
@@ -184,163 +187,6 @@ class OptFlowObject(SerializableSample):
                 v = (1.0 - np.clip(uv[:, 1], 0, 1)) * (Ht - 1)            # st is bottom-left; image is top-left
                 face_rgb = tex[v.astype(int), u.astype(int)].astype(np.float64) / 255.0
         return points, faces, face_rgb
-
-
-@dataclass
-class OptFlowSample(SerializableSample):
-    """One rendered observation frame of the dense-optical-flow dataset.
-
-    The per-frame-unique payload: an ``ObsMask`` (the RGBA observation + cid/iid masks +
-    per-instance occlusion — the seg pipeline's exact per-frame datastruct, serialized FLAT so
-    ``ObsMask.deserialize(idx, render_dir)`` reads it directly), its FULL-frame metric depth (NOT
-    masked — the warp samples it only for the consistency/occlusion check, so workbench and
-    background depth are correct context, not noise), and the observation camera pose in OpenCV
-    (+Z-forward) convention. The per-instance ``obsmask.iid_mask`` lets the UFM adapter isolate one
-    instance (mask out same-class siblings) for 1-to-1 flow. The per-render constants (each
-    object's reference RGB-D, pose, intrinsics, placement) live once-per-render-dir in
-    ``OptFlowMetadata``. ``obsmask.obs`` (RGBA) replaces the old ``observation`` RGB — read
-    ``obsmask.obs[:3]`` for the 3-channel frame (requires ``full_alpha=True`` at capture so it is
-    the full, unmasked frame).
-    """
-    obsmask: ObsMask                 # RGBA obs + cid/iid masks + occlusion; serialized FLAT (nested sample)
-    observation_depth: np.ndarray    # (H, W) float32 metric z-depth, full frame (distance_to_image_plane)
-    cam2world: np.ndarray            # (4, 4) obs camera2world SE3, OpenCV (+Z-forward)
-
-    # obsmask serializes its own subdirs flat (datastructs nested-sample rule); the two np.ndarray
-    # fields use the base serializer.
-    _serializers = SerializableSample._serializers
-
-    def visualize(self, md, *, cls_name=None, points=None, n_points=12, rel=0.05, title=None) -> np.ndarray:
-        """GT reference→observation correspondence as labeled points, for eyeballing the warp.
-
-        A top ``[cid_mask | iid_mask]`` row shows the per-pixel id masks with class/instance legends.
-        One ``[ref | obs]`` row per class (pass ``cls_name`` to restrict to one). The class's single
-        canonical reference is warped — via RoMa's ``get_gt_warp`` (the exact warp the trainer uses)
-        — into EVERY instance of that class (1-to-many): reference candidates are numbered neutral
-        Xs on the left, and each instance fans out into the single obs panel in its own color, with
-        connection lines back to the shared reference point. Candidates occluded / out-of-view for a
-        given instance simply don't draw for it.
-
-        Candidates are sampled ONLY where the reference has valid depth (``reference_depth>0``, on
-        the object): a coarse grid over the valid-depth region by default, or pass
-        ``points=[(x, y), ...]`` (reference pixels, e.g. the grasp pixel) for specific coordinates.
-
-        ``md`` is this render dir's ``OptFlowMetadata``. Requires ``romatch`` importable
-        (dev/optional dep); matplotlib + romatch are imported lazily so importing this module stays
-        light. Returns an (H, W, 3) uint8 RGB array.
-        """
-        import matplotlib.pyplot as plt
-        from matplotlib.patches import ConnectionPatch, Patch
-        from romatch.utils.utils import get_gt_warp          # authoritative warp, directly imported
-        from vision_core.viz import panel_grid, figure_to_ndarray
-
-        obs = self.obsmask.obs.permute(1, 2, 0).numpy()[..., :3]
-        Hb, Wb = obs.shape[:2]
-        dB = torch.as_tensor(self.observation_depth, dtype=torch.float32)
-        K_B = torch.as_tensor(md.obs_intrinsics, dtype=torch.float32)
-        rows = []
-        for cls in ([cls_name] if cls_name else list(md.class_to_name)):     # iterate classes, 1-many
-            dA = md.class_to_reference_depth[cls].float()                    # (Ha, Wa) canonical ref depth
-            L = md.class_to_l2w[cls].float()                                 # (N, 4, 4) this class's placements
-            N = L.shape[0]
-            inv_c2w = torch.as_tensor(np.linalg.inv(self.cam2world), dtype=torch.float32)
-            T = torch.einsum('ij,njx,xy->niy', inv_c2w, L,                   # (N, 4, 4) ref-cam → obs-cam, per instance
-                             md.class_to_ref_pose[cls].float())
-            K_A = md.class_to_ref_intrinsics[cls].float()
-            x2, prob = get_gt_warp(                                          # batch = N: expand singletons to match T
-                dA[None].expand(N, -1, -1), dB[None].expand(N, -1, -1), 
-                T[:, :3],
-                K_A[None].expand(N, -1, -1), K_B[None].expand(N, -1, -1),
-                relative_depth_error_threshold=rel,
-            )
-            x2, prob = x2.numpy(), prob.numpy()                             # x2 (N,Ha,Wa,2) normalized, prob (N,Ha,Wa)
-            valid_ref = dA.numpy() > 0                                       # ref pixels on the object
-            Ha, Wa = valid_ref.shape
-            if points is not None:
-                pts = [(int(round(y)), int(round(x))) for x, y in points]
-                cand = [(yy, xx) for yy, xx in pts
-                        if 0 <= yy < Ha and 0 <= xx < Wa and valid_ref[yy, xx]]
-            else:
-                vy, vx = np.nonzero(valid_ref)
-                if not len(vy):
-                    continue
-                gy = np.linspace(vy.min(), vy.max(), 5).astype(int)
-                gx = np.linspace(vx.min(), vx.max(), 5).astype(int)
-                cand = [(y, x) for y in gy for x in gx if valid_ref[y, x]][:n_points]
-            if cand:
-                rows.append((cls, x2, prob, cand))
-
-        def draw_id_mask(ax, mask, id_to_label, name):                   # discrete id mask + legend
-            ids = [int(i) for i in np.unique(mask) if i != 0]            # 0 = background
-            rgb = np.zeros((*mask.shape, 3))
-            handles = []
-            for k, i in enumerate(ids):
-                c = plt.cm.tab20(k % 20)[:3]
-                rgb[mask == i] = c
-                handles.append(Patch(color=c, label=f"{i}: {id_to_label.get(i, '?')}"))
-            ax.imshow(rgb)
-            ax.set_title(name, fontsize=8)
-            ax.axis("off")
-            if handles:
-                ax.legend(handles=handles, fontsize=6, loc="upper right", framealpha=0.7)
-
-        fig, axes = panel_grid(2 + 2 * len(rows), cols=2, panel_w=5.0, panel_h=4.0)   # [cid|iid] masks, then [ref|obs] per class
-        draw_id_mask(axes[0], self.obsmask.cid_mask.numpy(), md.obsmaskmeta.cid_to_class, "cid_mask")
-        draw_id_mask(axes[1], self.obsmask.iid_mask.numpy(), md.obsmaskmeta.iid_to_name, "iid_mask")
-        for r, (cls, x2, prob, cand) in enumerate(rows):
-            ax_ref, ax_obs = axes[2 + 2 * r], axes[2 + 2 * r + 1]
-            ax_ref.imshow(md.class_to_reference[cls].permute(1, 2, 0).numpy()[..., :3])
-            ax_obs.imshow(obs)
-            ax_ref.set_title(f"{cls} ref", fontsize=8)
-            ax_obs.set_title(f"obs · {x2.shape[0]} instances", fontsize=8)
-            for i, (y, x) in enumerate(cand):                              # shared reference candidates (neutral)
-                ax_ref.plot(x, y, "x", ms=9, mew=2, color="k")
-                ax_ref.text(x + 3, y - 3, str(i), color="k", fontsize=8)
-            for n in range(x2.shape[0]):                                   # one color per instance → fan-out
-                c = plt.cm.turbo(n / max(x2.shape[0] - 1, 1))
-                for i, (y, x) in enumerate(cand):
-                    if prob[n, y, x] <= 0:                                 # occluded / out-of-view for this instance
-                        continue
-                    ub, vb = (x2[n, y, x, 0] + 1) * Wb / 2, (x2[n, y, x, 1] + 1) * Hb / 2
-                    ax_obs.plot(ub, vb, "x", ms=8, mew=2, color=c)
-                    ax_obs.text(ub + 3, vb - 3, str(i), color=c, fontsize=7)
-                    fig.add_artist(ConnectionPatch((ub, vb), (x, y), "data", "data",
-                                                   axesA=ax_obs, axesB=ax_ref, color=c, lw=0.5, alpha=0.4))
-            ax_ref.axis("off")
-            ax_obs.axis("off")
-        if title:
-            fig.suptitle(title, fontsize=10)
-        return figure_to_ndarray(fig)
-
-
-@dataclass
-class OptFlowMetadata(SerializableSample):
-    """Per-render-dir catalog of the optical-flow dataset, serialized once (at idx=0).
-
-    Keyed BY CLASS, not instance. Each class owns one canonical reference (RGB, metric depth,
-    intrinsics, camera2local pose) plus the world placements of ALL its instances in this render
-    dir — the 1-to-many contract: one reference depth map warps into every same-class instance.
-    Mirrors ``ObsMaskMetadata``: every per-class collection is a plain dict ``torch.save``d once
-    via ``_DICT_PT_SERIALIZER`` (preserves str keys + Image/Tensor values), so the reference
-    depth is stored once rather than duplicated into every frame.
-
-    The trainer warps the one reference into each instance ``n`` of class ``cls`` via
-    ``T_ref→obs[n] = inv(cam2world) @ class_to_l2w[cls][n] @ class_to_ref_pose[cls]`` (all OpenCV).
-    """
-    obsmaskmeta: ObsMaskMetadata     # the seg-pipeline catalog (cid_to_class/iid_to_name/name_to_class/
-                                     # class_to_ref/class_to_descriptors/principal_components), serialized
-                                     # FLAT; supplies cid_to_class (pairs with obsmask.cid_mask) + iid_to_name
-    obs_intrinsics: np.ndarray       # (3, 3) observation K (shared)
-    class_to_name: dict              # {class → list[str]} instance names, aligned to class_to_l2w rows
-    class_to_reference: dict         # {class → tv_tensors.Image (3, H, W)} canonical reference RGB
-    class_to_reference_depth: dict   # {class → torch.Tensor (Ha, Wa)} metric z-depth, 0 off-object
-    class_to_ref_intrinsics: dict    # {class → torch.Tensor (3, 3)} reference K
-    class_to_ref_pose: dict          # {class → torch.Tensor (4, 4)} camera2local SE3, OpenCV
-    class_to_l2w: dict               # {class → torch.Tensor (N, 4, 4)} the class's N instance placements
-
-    # obsmaskmeta serializes its own subdirs flat (nested-sample rule); obs_intrinsics → .npy
-    # (base np.ndarray); every class_to_* dict → one .pt (torch.save).
-    _serializers = {**SerializableSample._serializers, **_DICT_PT_SERIALIZER}
 
 
 SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
