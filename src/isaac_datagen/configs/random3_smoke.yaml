@@ -1,0 +1,46 @@
+# Random 3-object orphan-iid smoke test (all graspable asset dirs).
+idx: 0
+mode: reference_segmentation
+dataset_dir: datasets/random3-smoke
+
+num_targets: 2
+num_frames: 5
+scene: empty
+intrinsics_path: zed_K.npy
+
+placement: UntilExhaustedStacker
+placement_args:
+  column_height: 1
+
+descriptor_device: cuda:1
+proposer_device: cuda:0
+dome_light: True
+dry_run: False
+proposer_max_occlusion: 1.0
+inlier_border_eps: 2.0
+
+xrange: [0.35, 0.85]
+yrange: [-0.42, 0.42]
+zrange: [-0.10, 0.10]
+pose_generation_policy: GridFixedPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+  target_to_ego_ypr: ${target_to_baseline_ypr_desired}
+  random: true
+
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/gim_dkm_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+
+objects_path:
+  - ../../assets/graspable_objects/object_dataset_amazon/
+  - ../../assets/graspable_objects/kleenex_dataset/
+  - ../../assets/graspable_objects/ycb_graspable/
+
+filter_specs:
+  - name: ShuffleFilter
+    args:
+      seed: ${idx}
+  - name: MetaFilter
+    args: {key: name, value: '*', max: 3}
