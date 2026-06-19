@@ -25,6 +25,10 @@ dependencies = [
     "fpsample<1",
 ]
 
+[project.optional-dependencies]
+# OptFlowSample.visualize() + debug_scripts/viz_optflow*.py (lazy-import romatch).
+viz = ["romatch"]
+
 [project.scripts]
 # main() loads the config and dispatches on runtime.mode (reference_segmentation | optflow).
 isaac-datagen = "isaac_datagen.clean_datagen:main"
@@ -74,7 +78,8 @@ gim = { path = "../gim", editable = true }
 detectron2 = { index = "torch-packages-builder" }
 mask2former = { path = "../Mask2Former", editable = true }
 multiscaledeformableattention = { path = "../Mask2Former/mask2former/modeling/pixel_decoder/ops" }
-romatch = { path = "../RoMa", editable = true }
+# Git, not ../RoMa path — refseg-workspace has no RoMa submodule; only fetched with --extra viz.
+romatch = { git = "https://github.com/Parskatt/RoMa.git", rev = "77f8d68803526dcddfd9b7a46bc76125bdc25f15" }
 
 # Isaac Sim and its omni*/kit* sub-deps are published on NVIDIA's index, not PyPI.
 # Non-explicit so it acts as an --extra-index-url fallback for those packages.
@@ -90,8 +95,3 @@ url = "https://pypi.nvidia.com"
 name = "torch-packages-builder"
 url = "https://miropsota.github.io/torch_packages_builder"
 explicit = true
-
-[dependency-groups]
-dev = [
-    "romatch",
-]

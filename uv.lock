@@ -1082,8 +1082,8 @@ dependencies = [
     { name = "vision-core" },
 ]
 
-[package.dev-dependencies]
-dev = [
+[package.optional-dependencies]
+viz = [
     { name = "romatch" },
 ]
 
@@ -1096,14 +1096,13 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "reference-matching", editable = "../reference_matching" },
+    { name = "romatch", marker = "extra == 'viz'", git = "https://github.com/Parskatt/RoMa.git" },
     { name = "scipy" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "vision-core", editable = "../vision_core" },
 ]
-
-[package.metadata.requires-dev]
-dev = [{ name = "romatch", editable = "../RoMa" }]
+provides-extras = ["viz"]
 
 [[package]]
 name = "isaacsim"
@@ -2913,7 +2912,7 @@ wheels = [
 [[package]]
 name = "romatch"
 version = "0.1.2"
-source = { editable = "../RoMa" }
+source = { git = "https://github.com/Parskatt/RoMa.git#77f8d68803526dcddfd9b7a46bc76125bdc25f15" }
 dependencies = [
     { name = "albumentations" },
     { name = "einops" },
@@ -2930,28 +2929,6 @@ dependencies = [
     { name = "tqdm" },
     { name = "wandb" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "albumentations" },
-    { name = "einops" },
-    { name = "fused-local-corr", marker = "sys_platform == 'linux' and extra == 'fused-local-corr'", specifier = ">=0.2.2" },
-    { name = "h5py" },
-    { name = "kornia" },
-    { name = "loguru" },
-    { name = "matplotlib" },
-    { name = "opencv-python" },
-    { name = "poselib", specifier = ">=2.0.4" },
-    { name = "timm" },
-    { name = "torch", specifier = ">=2.5.1" },
-    { name = "torchvision" },
-    { name = "tqdm" },
-    { name = "wandb" },
-]
-provides-extras = ["fused-local-corr"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.13.1" }]
 
 [[package]]
 name = "rtree"
