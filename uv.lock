@@ -1096,7 +1096,7 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "reference-matching", editable = "../reference_matching" },
-    { name = "romatch", marker = "extra == 'viz'", git = "https://github.com/Parskatt/RoMa.git" },
+    { name = "romatch", marker = "extra == 'viz'", git = "https://github.com/Parskatt/RoMa.git?rev=77f8d68803526dcddfd9b7a46bc76125bdc25f15" },
     { name = "scipy" },
     { name = "torch" },
     { name = "torchvision" },
@@ -2912,7 +2912,7 @@ wheels = [
 [[package]]
 name = "romatch"
 version = "0.1.2"
-source = { git = "https://github.com/Parskatt/RoMa.git#77f8d68803526dcddfd9b7a46bc76125bdc25f15" }
+source = { git = "https://github.com/Parskatt/RoMa.git?rev=77f8d68803526dcddfd9b7a46bc76125bdc25f15#77f8d68803526dcddfd9b7a46bc76125bdc25f15" }
 dependencies = [
     { name = "albumentations" },
     { name = "einops" },
@@ -3557,12 +3557,16 @@ name = "vision-core"
 version = "0.1.0"
 source = { editable = "../vision_core" }
 dependencies = [
+    { name = "fpsample" },
+    { name = "matplotlib" },
     { name = "omegaconf" },
     { name = "tqdm" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fpsample", specifier = "<1" },
+    { name = "matplotlib" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
 ]

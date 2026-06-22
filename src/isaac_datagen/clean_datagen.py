@@ -124,7 +124,7 @@ def reference_segmentation(runtime=None):
 def optflow_generation(runtime=None):
     """Optical-flow capture: place OptFlowObjects in clutter, capture per-frame RGB-D + camera
     pose, and write the per-render constant catalog once. Each ``OptFlowSample`` nests a full
-    ``ObsMask`` (serialized flat) and ``OptFlowMetadata`` nests an ``ObsMaskMetadata``, so the
+    ``ObsMask`` (serialized flat) and ``OptFlowMetadata`` nests an ``ObsMaskDescriptorMetadata``, so the
     render dir is ALSO a reference-seg render dir consumable by run_pipeline phases 2 & 3.
 
     Mirrors reference_segmentation; plan_capture is reused purely as the camera-pose
@@ -169,7 +169,7 @@ def optflow_generation(runtime=None):
     warmup_render(app, runtime.warmup_frames)      # settle RTX before the writer captures
     capture_with_poses(world_poses, writer, scene.zed, replicator, rt_subframes=runtime.rt_subframes)
 
-    # Write the per-render-dir constants (nested ObsMaskMetadata + optflow per-class catalog).
+    # Write the per-render-dir constants (nested ObsMaskDescriptorMetadata + optflow per-class catalog).
     writer.finalize_metadata(render_dir)
 
     with open(render_dir / 'runtime.yaml', 'w') as f:

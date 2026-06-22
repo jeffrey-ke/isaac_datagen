@@ -6,7 +6,7 @@ Catches writer bugs where ``iid_mask`` segments an object but ``cid_iid_masks`` 
 to assign a class (e.g. tuna with 38k iid pixels and 0 ``fish can`` cid pixels).
 
 Membership is per-sample only — Isaac iids are session-local; do not union iids
-across frames or use ``ObsMaskMetadata.iid_to_name`` for the check (catalog names are
+across frames or use ``ObsMaskDescriptorMetadata.iid_to_name`` for the check (catalog names are
 for error display only).
 
 Usage:
@@ -23,7 +23,7 @@ from pathlib import Path
 import torch
 from torchvision import tv_tensors
 
-from vision_core.datastructs import ObsMask, ObsMaskMetadata, count_samples
+from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata, count_samples
 
 MIN_CLASS_CID = 2
 
@@ -85,7 +85,7 @@ def check_obsmask(obs: ObsMask, frame: int, *, min_class_cid: int = MIN_CLASS_CI
 
 def validate_render_dir(render_dir: Path, *, min_class_cid: int = MIN_CLASS_CID) -> list[CidOrphan]:
     render_dir = Path(render_dir)
-    md = ObsMaskMetadata.deserialize(0, render_dir)
+    md = ObsMaskDescriptorMetadata.deserialize(0, render_dir)
     iid_to_name = {int(k): v for k, v in md.iid_to_name.items()}
     out: list[CidOrphan] = []
     for f, obs in enumerate(load_obsmasks(render_dir)):

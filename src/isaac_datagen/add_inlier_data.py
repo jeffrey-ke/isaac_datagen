@@ -19,7 +19,7 @@ import argparse
 from pathlib import Path
 
 from vision_core.datastructs import (
-    ObsMaskMetadata, PreReferenceSegSample, PreImageInlierSample, ImageInlierMetadata,
+    ObsMaskDescriptorMetadata, PreReferenceSegSample, PreImageInlierSample, ImageInlierMetadata,
 )
 from vision_core.mask_utils import coords_in_mask
 
@@ -32,7 +32,7 @@ def main():
     args = p.parse_args()
     render_dir = args.render_dir
 
-    md = ObsMaskMetadata.deserialize(0, render_dir)
+    md = ObsMaskDescriptorMetadata.deserialize(0, render_dir)
     class_to_cid = {cls: cid for cid, cls in md.cid_to_class.items()}  # 1:1 by construction
 
     n_frames = len(list((render_dir / "obs").iterdir()))
@@ -52,7 +52,7 @@ def main():
         n_total += n_tot
         print(f"[{idx + 1}/{n_frames}] {render_dir.name}: {n_in}/{n_tot} inliers, {len(labels)} class(es)")
 
-    # Per-render-dir stats catalog (written once, like ObsMaskMetadata). Records the
+    # Per-render-dir stats catalog (written once, like ObsMaskDescriptorMetadata). Records the
     # eps the labels were generated with — the labeling pass's provenance.
     ImageInlierMetadata(
         stats={"n_inliers": n_inliers, "n_total": n_total, "eps": args.eps},

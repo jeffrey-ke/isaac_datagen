@@ -20,7 +20,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from vision_core.datastructs import PreImageInlierSample, ObsMaskMetadata, count_samples
+from vision_core.datastructs import PreImageInlierSample, ObsMaskDescriptorMetadata, count_samples
 from vision_core.viz import inlier_figure, save_figure
 
 
@@ -53,7 +53,7 @@ def main():
     classes = ([c.strip() for c in args.classes.split(",") if c.strip()]
                if args.classes else None)
 
-    md = ObsMaskMetadata.deserialize(0, render_dir)
+    md = ObsMaskDescriptorMetadata.deserialize(0, render_dir)
     if classes:
         known = set(md.cid_to_class.values())
         bad = [c for c in classes if c not in known]

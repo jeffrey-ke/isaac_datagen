@@ -24,7 +24,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from vision_core.datastructs import ObsMask, ObsMaskMetadata, count_samples
+from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata, count_samples
 from vision_core.viz import error_panel, occlusion_panel, panel_grid, save_figure
 
 
@@ -53,7 +53,7 @@ def main():
         sys.exit(1)
     sample = random.Random(args.seed).sample(pairs, min(args.n, len(pairs)))
 
-    metadata = functools.cache(lambda rd: ObsMaskMetadata.deserialize(0, rd))
+    metadata = functools.cache(lambda rd: ObsMaskDescriptorMetadata.deserialize(0, rd))
 
     # wide wspace leaves a gutter for each panel's external (right-side) legend
     fig, axes = panel_grid(len(sample), args.cols, 6.2, 4.6, wspace=0.6, hspace=0.2)

@@ -25,7 +25,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 
-from vision_core.datastructs import PreImageInlierSample, ObsMaskMetadata, count_samples
+from vision_core.datastructs import PreImageInlierSample, ObsMaskDescriptorMetadata, count_samples
 from vision_core.viz import (add_thumbnail, assign_colors, overlay_id_masks, panel_grid,
                              rgba_chw_to_rgb, save_figure, scatter_labeled)
 from isaac_datagen.viz_inliers import select_frames
@@ -101,7 +101,7 @@ def main():
         print(f"no labels/ in {render_dir} — run isaac-datagen-inliers first", file=sys.stderr)
         sys.exit(1)
 
-    md = ObsMaskMetadata.deserialize(0, render_dir)
+    md = ObsMaskDescriptorMetadata.deserialize(0, render_dir)
     n_frames = count_samples(render_dir)
     frames = select_frames(n_frames, args.frames, args.stride, args.max_frames)
 

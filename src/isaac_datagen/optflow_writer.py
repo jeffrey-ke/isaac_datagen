@@ -10,7 +10,7 @@ depth is correct context), and the observation camera2world pose in OpenCV conve
 GL ``world_poses``).
 
 The per-render constants are written once via ``finalize_metadata`` as one ``OptFlowMetadata`` that
-NESTS the ``ObsMaskMetadata`` (also serialized flat): the optflow per-class catalog (each object's
+NESTS the ``ObsMaskDescriptorMetadata`` (also serialized flat): the optflow per-class catalog (each object's
 reference RGB-D, pose, intrinsics, world placement) plus the seg catalog (id maps, per-class
 reference DIFT descriptors, PCA basis) that the seg trainers require.
 

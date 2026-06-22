@@ -12,12 +12,12 @@ from PIL import Image as PILImage
 from torchvision import tv_tensors
 
 from vision_core.datastructs import SerializableSample
-# ObsMask / PreReferenceSegSample / ObsMaskMetadata / OptFlowSample / OptFlowMetadata live in
+# ObsMask / PreReferenceSegSample / ObsMaskDescriptorMetadata / OptFlowSample / OptFlowMetadata live in
 # vision_core.datastructs (the shared package) so sibling envs — `segmentation-train` and the
 # UFM trainer, which can't take an isaacsim dependency — can import them too. The OptFlow* pair is
 # the optflow dataset contract; re-exported here for convenience (e.g. optflow_writer.py).
 from vision_core.datastructs import (
-    ObsMask, PreReferenceSegSample, ObsMaskMetadata, OptFlowSample, OptFlowMetadata,
+    ObsMask, PreReferenceSegSample, ObsMaskDescriptorMetadata, OptFlowSample, OptFlowMetadata,
 )
 
 from isaac_datagen.isaac_utils import load_asset, set_transform, create_empty

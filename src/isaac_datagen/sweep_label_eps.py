@@ -1,7 +1,7 @@
 """Sweep the coords_in_mask border-eps on one frame and visualize how labels change.
 
 Read-only spot check for tuning ``vision_core.mask_utils.MASK_BORDER_EPS``: deserialize
-one PreReferenceSegSample (+ ObsMaskMetadata) from a normalized render dir, recompute the
+one PreReferenceSegSample (+ ObsMaskDescriptorMetadata) from a normalized render dir, recompute the
 per-class inlier labels at several eps values via ``coords_in_mask(cid_mask == cid,
 coords, eps)`` (the exact phase-3 labeling expression), build a PreImageInlierSample per
 eps, render each via its ``.visualize(md)``, and emit per-eps PNGs + a vertically-stacked
@@ -23,7 +23,7 @@ import numpy as np
 from PIL import Image
 
 from vision_core.datastructs import (
-    ObsMaskMetadata, PreImageInlierSample, PreReferenceSegSample,
+    ObsMaskDescriptorMetadata, PreImageInlierSample, PreReferenceSegSample,
 )
 from vision_core.mask_utils import coords_in_mask
 
@@ -63,7 +63,7 @@ def main():
 
     matplotlib.rcParams["figure.dpi"] = args.dpi  # visualize() rasterizes at figure dpi
 
-    md = ObsMaskMetadata.deserialize(0, args.render_dir)
+    md = ObsMaskDescriptorMetadata.deserialize(0, args.render_dir)
     class_to_cid = {cls: cid for cid, cls in md.cid_to_class.items()}
     pre = PreReferenceSegSample.deserialize(args.idx, args.render_dir)
 

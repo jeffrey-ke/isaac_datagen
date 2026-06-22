@@ -32,7 +32,7 @@ import torch
 import torch.nn.functional as F
 
 from reference_matching import descriptor as descriptor_module
-from vision_core.datastructs import ObsMask, ObsMaskMetadata
+from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata
 from vision_core.viz import (OUTSIDE_LEGEND_KW, assign_colors, color_legend, mask_centroid,
                              overlay_id_masks, panel_grid, rgba_chw_to_rgb, save_figure)
 
@@ -201,7 +201,7 @@ def main():
     if args.seed_iids:
         iids, init_xy = id_centroid_seeds(om.iid_mask)
         num_clusters = args.num_clusters or len(iids)
-        md = ObsMaskMetadata.deserialize(0, args.render_dir)
+        md = ObsMaskDescriptorMetadata.deserialize(0, args.render_dir)
         cluster_labels = {i: md.iid_to_name[iid] for i, iid in enumerate(iids)}
     else:
         init_xy = parse_init(args.init)

@@ -1,4 +1,4 @@
-"""Backfill the mandatory ObsMaskMetadata.principal_components field on existing catalogs.
+"""Backfill the mandatory ObsMaskDescriptorMetadata.principal_components field on existing catalogs.
 
 Reads ONLY ``class_to_descriptors`` via ``deserialize_field`` (a full ``deserialize``
 would require ``principal_components/`` to already exist — the exact chicken-and-egg
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import torch
 
-from vision_core.datastructs import ObsMaskMetadata
+from vision_core.datastructs import ObsMaskDescriptorMetadata
 from vision_core.viz import fit_pca_basis
 
 
@@ -24,7 +24,7 @@ def migrate_render_dir(rd: Path, dry_run: bool) -> int:
     n = 0
     for pt in sorted((rd / "class_to_descriptors").glob("class_to_descriptors_*.pt")):
         idx = int(pt.stem.rsplit("_", 1)[1])
-        c2d = ObsMaskMetadata.deserialize_field(idx, rd, "class_to_descriptors")
+        c2d = ObsMaskDescriptorMetadata.deserialize_field(idx, rd, "class_to_descriptors")
         # Same flatten(1).T tokenization consumers read (segmentation/dataset.py).
         tokens = torch.cat([d.flatten(1).T for d in c2d.values()], dim=0)
         basis = fit_pca_basis(tokens, n=3)
@@ -33,9 +33,9 @@ def migrate_render_dir(rd: Path, dry_run: bool) -> int:
         if not dry_run:
             # Bypass __init__: serialize(only=...) skips every other field before any
             # getattr, so a bare instance carrying just this one attribute is safe
-            # (ObsMaskMetadata has no __post_init__) and avoids re-reading the other
+            # (ObsMaskDescriptorMetadata has no __post_init__) and avoids re-reading the other
             # fields just to write one. Residual + atomic, like the phase-2.5 pass.
-            md = ObsMaskMetadata.__new__(ObsMaskMetadata)
+            md = ObsMaskDescriptorMetadata.__new__(ObsMaskDescriptorMetadata)
             md.principal_components = basis
             md.serialize(idx, rd, only={"principal_components"})
         n += 1

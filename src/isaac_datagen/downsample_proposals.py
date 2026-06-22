@@ -20,19 +20,19 @@ Usage: isaac-datagen-downsample-proposals <render_dir> [--max-points 256] [--dry
 import argparse
 from pathlib import Path
 
-import fpsample
 import torch
 from tqdm import tqdm
 
 from vision_core.datastructs import PreReferenceSegSample
+from vision_core.sampling import fps_indices
 
 
 def fps_downsample(xy: torch.Tensor, k: int) -> torch.Tensor:
-    """At most k spatially spread rows of an (N, 2) coord tensor, deterministically."""
-    if xy.shape[0] <= k:
-        return xy  # fpsample asserts on K > N, and identity needs no call
-    idx = fpsample.fps_sampling(xy.numpy(), k, start_idx=0)
-    return xy[torch.from_numpy(idx.astype("int64"))]
+    """At most k spatially spread rows of an (N, 2) coord tensor, deterministically.
+
+    Rows-returning wrapper over the shared ``vision_core.sampling.fps_indices`` (which
+    returns indices, handles N<=k as identity, and pins start_idx=0)."""
+    return xy[fps_indices(xy, k)]
 
 
 def main():

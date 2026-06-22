@@ -1,7 +1,7 @@
 """Phase-2 pass: add proposer point-prompts to a rendered ObsMask dataset.
 
 Runs AFTER Isaac has produced the per-frame ``ObsMask``s and the per-render-dir
-``ObsMaskMetadata`` catalog. Does NOT boot Isaac Sim — it only needs torch +
+``ObsMaskDescriptorMetadata`` catalog. Does NOT boot Isaac Sim — it only needs torch +
 ``reference_matching``. Operates in class space: for each frame it runs the
 (expensive) proposer once per class present (against the class's canonical
 reference), skipping classes whose every member is more occluded than
@@ -27,7 +27,7 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from vision_core.datastructs import ObsMask, ObsMaskMetadata, PreReferenceSegSample
+from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata, PreReferenceSegSample
 from vision_core.seed_utils import seed_everything
 from isaac_datagen.runtime_config import load_config
 
@@ -39,7 +39,7 @@ def main():
     runtime = load_config(sys.argv[1], sys.argv[2:])
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
 
-    md = ObsMaskMetadata.deserialize(0, render_dir)
+    md = ObsMaskDescriptorMetadata.deserialize(0, render_dir)
 
     # Glob the real frame files (not iterdir) so a stray tmp dotfile from a
     # hard-killed phase-1 run can't inflate the count.

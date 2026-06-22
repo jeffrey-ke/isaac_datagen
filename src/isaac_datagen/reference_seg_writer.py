@@ -6,7 +6,7 @@ pairs with per-instance occlusion) and a class-id mask (cid_mask) derived from i
 a LUT over ``idToSemantics``'s class labels, so all same-class boxes share one value.
 The constant object catalog (canonical per-class reference images, precomputed DIFT
 descriptors, id-space maps) is written once per render dir via ``finalize_metadata``
-as an ``ObsMaskMetadata``. The expensive proposer forward is deferred to a phase-2
+as an ``ObsMaskDescriptorMetadata``. The expensive proposer forward is deferred to a phase-2
 pass (see ``add_proposals``).
 
 Why not Isaac's ``semantic_segmentation`` annotator for the class mask: it assigns ids
@@ -24,7 +24,7 @@ from torchvision import tv_tensors
 
 from omni.replicator.core import AnnotatorRegistry, Writer
 
-from vision_core.datastructs import ObsMask, ObsMaskMetadata
+from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata
 from vision_core.viz import fit_pca_basis
 
 from isaac_datagen.isaac_utils import cid_iid_masks
@@ -145,14 +145,14 @@ def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
 
 
 def obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descriptors, iid_to_name):
-    """Build the per-render-dir ``ObsMaskMetadata`` from the static catalog + accumulated iids.
+    """Build the per-render-dir ``ObsMaskDescriptorMetadata`` from the static catalog + accumulated iids.
 
     The shared PCA→RGB basis is fit over ALL classes' tokens (each (C,h,w) → (h*w, C), stacked —
     the same ``flatten(1).T`` tokenization consumers read), so every class projects into
-    comparable colors. Mandatory ``ObsMaskMetadata`` field.
+    comparable colors. Mandatory ``ObsMaskDescriptorMetadata`` field.
     """
     tokens = torch.cat([d.flatten(1).T for d in class_to_descriptors.values()], dim=0)
-    return ObsMaskMetadata(
+    return ObsMaskDescriptorMetadata(
         iid_to_name=iid_to_name,
         cid_to_class={cid: cls for cls, cid in class_to_cid.items()},
         name_to_class=name_to_class,

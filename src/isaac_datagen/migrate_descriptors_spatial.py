@@ -6,7 +6,7 @@ DiftDescriptor now emits spatial (B, C, h, w); old datasets stored (N, C)
     inverse here: (N, C) -> .T.reshape(C, h, w)          (h = w = isqrt(N), asserted)
 Idempotent (ndim==3 tensors skipped); each tensor round-trip checked
 (spatial.flatten(1).T == original, exact) before overwrite. IO goes through
-ObsMaskMetadata.deserialize / serialize(only=...) — the same registered
+ObsMaskDescriptorMetadata.deserialize / serialize(only=...) — the same registered
 serializers (and atomic writes) the producer used.
 
     uv run python src/isaac_datagen/migrate_descriptors_spatial.py <dataset_root>
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import torch
 
-from vision_core.datastructs import ObsMaskMetadata
+from vision_core.datastructs import ObsMaskDescriptorMetadata
 
 
 def migrate_tensor(t: torch.Tensor) -> torch.Tensor | None:
@@ -37,7 +37,7 @@ def migrate_render_dir(rd: Path) -> int:
     n_migrated = 0
     for pt_path in sorted((rd / "class_to_descriptors").glob("class_to_descriptors_*.pt")):
         idx = int(pt_path.stem.rsplit("_", 1)[1])
-        md = ObsMaskMetadata.deserialize(idx, rd)
+        md = ObsMaskDescriptorMetadata.deserialize(idx, rd)
         file_migrated = 0
         for cls, t in md.class_to_descriptors.items():
             spatial = migrate_tensor(t)
