@@ -1,0 +1,78 @@
+idx: 0
+num_targets: 3
+num_frames: 100
+scene: empty
+intrinsics_path: zed_K.npy
+placement: UntilExhaustedStacker
+placement_args:
+  column_height: 3   # explicit — no hidden ctor default (was relying on RuntimeConfig's old default)
+descriptor_device: cuda:1
+proposer_device: cuda:0
+dome_light: True
+
+dry_run: False
+
+# Lighting: aimed DistantLight key + DomeLight fill (see RuntimeConfig). The key is
+# aimed at the grasp-target centroid; distant_light_offset is the sun direction
+# (front-top into the -Y faces). TUNE distant_intensity on the first render.
+distant_light: True
+distant_intensity: 2000.0
+distant_angle: 0.53
+distant_light_offset: [1.0, -3.0, 3.0]
+dome_fill_intensity: 200.0
+
+# Phase-3 inliers: border margin (px) a proposal must keep inside its class union mask.
+inlier_border_eps: 0.0
+
+# Camera pose-sampling box in the TARGET frame (the "halo" around each grasp point).
+# Currently near-degenerate: x and z are fixed, only y varies (-0.22..0) -> poses fan
+# along one axis on one side instead of orbiting. Widen these for a fuller halo.
+xrange: [0.25, 0.85]
+yrange: [-0.42, 0.42]
+zrange: [-0.40, 0.40]
+
+# Pose-generation policy (posers.py registry). Ranges interpolate the halo box above.
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+
+# Invisible shadow-casting occluders, per grasp target (0 = off). Placed once via
+# this poser, sampled in the TARGET frame then mapped to world by target2world.
+# E4 (penetrate-vs-float test): one fixed-offset Cube per target. +x is toward the
+# camera and the box sits at x<=0, so offset=[0,0,0] straddles the box (penetrate)
+# and offset=[0.2,0,0] floats in front (override on the float run). occluder_scale
+# fixes the cube at ~half the old random size for a clean, reproducible placement.
+occluders_per_target: 0
+occluder_pose_policy: GridFixedPoser
+occluder_pose_policy_args:
+  xrange: [0.85, 0.95]
+  yrange: [-0.42, 0.42]
+  zrange: [-0.40, 0.40]
+  target_to_ego_ypr: [0,0,0]
+occluder_scale: 0.06
+
+# Reference-free grid proposer (32x18 cell-center anchors): matcher-recall-independent
+# coverage for the verifier's PreImageInlierSample labels. add_proposals still runs it
+# once per visible class and keys by class, so phase 3 labels each grid against that
+# class's union mask. Grid ignores the reference; swap to random_proposal.yaml for
+# stochastic coverage. Tune num_w/num_h in the proposer config.
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/random_proposal.yaml
+
+# Raised from 0.25: grid coverage is matcher-independent, so emit anchors even for
+# heavily-occluded classes. 1.0 keeps any class with at least one visible pixel
+# (occlusion==1.0 fully-occluded and NaN-unknown still drop).
+proposer_max_occlusion: 1.0
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+
+objects_path:
+  - ../../assets/optflow_objects/amazon/
+
+obs_full_alpha: False
+filter_specs:
+  - name: ReplicateFilter
+    args: {key: name, value: 'amazon_*', count: 5} # then duplicate that amazon object 5 times
+  - name: ShuffleFilter
+    args: 
+      seed: ${idx}
