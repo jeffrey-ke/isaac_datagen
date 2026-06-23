@@ -24,7 +24,9 @@ from torchvision import tv_tensors
 
 from omni.replicator.core import AnnotatorRegistry, Writer
 
-from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata
+import yaml
+
+from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata, SubfolderDict
 from vision_core.viz import fit_pca_basis
 
 from isaac_datagen.isaac_utils import cid_iid_masks
@@ -86,7 +88,7 @@ def _occlusion_by_iid(occ, iid_to_labels, instance_mappings, present_iids) -> di
 def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
     """The static per-class catalog both writers build identically (shared writer init).
 
-    Returns ``(class_to_cid, name_to_class, class_to_ref, class_to_descriptors)``. cids derive
+    Returns ``(class_to_cid, name_to_class, class_to_ref, class_to_descriptors, backbone)``. cids derive
     from the SORTED class set (start=2, mirroring Isaac 0=BACKGROUND/1=UNLABELLED) so they are
     deterministic across render dirs that place the same class subset; each render dir stays
     self-describing via cid_to_class. One canonical reference per class (first member by sorted
@@ -101,6 +103,7 @@ def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
     for obj in sorted(object_specs, key=lambda o: o.meta["name"]):
         class_to_ref.setdefault(obj.meta["class"], _pil_to_tv_rgba(obj.reference_image))
 
+    backbone = yaml.safe_load(Path(descriptor_config_path).read_text())["name"]  # SubfolderDict key
     from reference_matching import descriptor as descriptor_module
     descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
     with torch.inference_mode():
@@ -109,7 +112,7 @@ def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
             for cls, tv_rgba in class_to_ref.items()   # (C, h, w) spatial
         }
     del descriptor
-    return class_to_cid, name_to_class, class_to_ref, class_to_descriptors
+    return class_to_cid, name_to_class, class_to_ref, class_to_descriptors, backbone
 
 
 def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
@@ -144,12 +147,15 @@ def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
                    iid_to_occlusion=iid_to_occlusion), frame_iid_to_name
 
 
-def obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descriptors, iid_to_name):
+def obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descriptors, iid_to_name,
+                     backbone):
     """Build the per-render-dir ``ObsMaskDescriptorMetadata`` from the static catalog + accumulated iids.
 
     The shared PCA→RGB basis is fit over ALL classes' tokens (each (C,h,w) → (h*w, C), stacked —
     the same ``flatten(1).T`` tokenization consumers read), so every class projects into
-    comparable colors. Mandatory ``ObsMaskDescriptorMetadata`` field.
+    comparable colors. ``class_to_descriptors`` and ``principal_components`` are stored as
+    ``SubfolderDict``s keyed by ``backbone`` (the descriptor registry name), so other backbones can be
+    added beside this one without re-rendering.
     """
     tokens = torch.cat([d.flatten(1).T for d in class_to_descriptors.values()], dim=0)
     return ObsMaskDescriptorMetadata(
@@ -157,8 +163,8 @@ def obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descrip
         cid_to_class={cid: cls for cls, cid in class_to_cid.items()},
         name_to_class=name_to_class,
         class_to_ref=class_to_ref,
-        class_to_descriptors=class_to_descriptors,
-        principal_components=fit_pca_basis(tokens, n=3),
+        class_to_descriptors=SubfolderDict({backbone: class_to_descriptors}),
+        principal_components=SubfolderDict({backbone: fit_pca_basis(tokens, n=3)}),
     )
 
 
@@ -190,7 +196,7 @@ class ObsMaskWriter(Writer):
         if not cid_iid_trace.enabled():
             cid_iid_trace.init(self._render_dir)
         (self.class_to_cid, self.name_to_class,
-         self.class_to_ref, self.class_to_descriptors) = reference_catalog(
+         self.class_to_ref, self.class_to_descriptors, self.backbone) = reference_catalog(
             object_specs, descriptor_config_path, descriptor_device)
         self.cid_to_class = {cid: cls for cls, cid in self.class_to_cid.items()}
 
@@ -210,4 +216,5 @@ class ObsMaskWriter(Writer):
         """Serialize the per-render-dir catalog once (at idx=0). Call after capture."""
         directory = Path(directory) if directory is not None else self._render_dir
         obsmask_metadata(self.class_to_cid, self.name_to_class, self.class_to_ref,
-                         self.class_to_descriptors, self.iid_to_name).serialize(0, directory)
+                         self.class_to_descriptors, self.iid_to_name,
+                         self.backbone).serialize(0, directory)

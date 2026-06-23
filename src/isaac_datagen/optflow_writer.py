@@ -57,7 +57,7 @@ class OptFlowWriter(Writer):
         self.iid_to_name: dict[int, str] = {}   # accumulated per frame (iids are session-local)
         # The same per-class catalog ObsMaskWriter builds (cids, refs, DIFT descriptors): the only NN forward.
         (self.class_to_cid, self.name_to_class,
-         self.class_to_ref, self.class_to_descriptors) = reference_catalog(
+         self.class_to_ref, self.class_to_descriptors, self.backbone) = reference_catalog(
             objects, descriptor_config_path, descriptor_device)
 
     def attach(self, *rps):
@@ -91,7 +91,8 @@ class OptFlowWriter(Writer):
         rep = {c: members[0][0] for c, members in by_class.items()}    # representative object per class
         OptFlowMetadata(
             obsmaskmeta=obsmask_metadata(self.class_to_cid, self.name_to_class,
-                                         self.class_to_ref, self.class_to_descriptors, self.iid_to_name),
+                                         self.class_to_ref, self.class_to_descriptors,
+                                         self.iid_to_name, self.backbone),
             obs_intrinsics=np.asarray(self._obs_K, dtype=np.float32),
             class_to_name={c: [o.meta["name"] for o, _ in members] for c, members in by_class.items()},
             class_to_reference={
