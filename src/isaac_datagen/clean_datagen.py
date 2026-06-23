@@ -12,6 +12,8 @@ import os
 # Let torch reuse fragmented reserved blocks; the SD ensemble allocation otherwise
 # fails against Isaac's resident CUDA memory on the shared GPU.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+# Non-interactive / batch: skip first-import EULA prompt (Isaac Sim pip docs).
+os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
 
 from dataclasses import asdict
 from pathlib import Path
