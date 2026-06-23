@@ -3560,6 +3560,8 @@ dependencies = [
     { name = "fpsample" },
     { name = "matplotlib" },
     { name = "omegaconf" },
+    { name = "opencv-python" },
+    { name = "scipy" },
     { name = "tqdm" },
 ]
 
@@ -3568,6 +3570,8 @@ requires-dist = [
     { name = "fpsample", specifier = "<1" },
     { name = "matplotlib" },
     { name = "omegaconf", specifier = ">=2.3.0" },
+    { name = "opencv-python" },
+    { name = "scipy" },
     { name = "tqdm", specifier = ">=4.67.3" },
 ]
 
