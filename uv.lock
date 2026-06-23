@@ -3557,6 +3557,8 @@ name = "vision-core"
 version = "0.1.0"
 source = { editable = "../vision_core" }
 dependencies = [
+    { name = "fpsample" },
+    { name = "matplotlib" },
     { name = "omegaconf" },
     { name = "opencv-python" },
     { name = "scipy" },
@@ -3565,6 +3567,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fpsample", specifier = "<1" },
+    { name = "matplotlib" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "opencv-python" },
     { name = "scipy" },
