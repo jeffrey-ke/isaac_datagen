@@ -1,3 +1,7 @@
+> **DEPRECATED — superseded by `artifact-registry.md`** (`isaac_datagen/.docs_claude/plans/completed/`).
+> `hf_sync.py` was removed in segmentation commit `c8e8a9a`; the current mechanism is the `art`
+> tool + per-repo `.artifacts.yaml`. Kept for history only — do not use this for new work.
+
 # Plan: `hf_sync.py` — preflight-gated HF dataset push/pull for `segmentation/`
 
 > **Status: completed 2026-06-08.** Shipped `segmentation/scripts/hf_sync.py`,

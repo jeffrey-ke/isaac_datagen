@@ -1,5 +1,12 @@
 # Artifact registry: dataset / asset / checkpoint over HF
 
+> **Supersedes `hf-dataset-sync.md`** (the `hf_sync.py` plan, completed 2026-06-08; copies in
+> `isaac_datagen/.docs_claude/plans/completed/` and `segmentation/.docs_claude/plans/completed/`).
+> That single-dataset push/pull script was removed in segmentation commit `c8e8a9a`
+> ("Adopt artifact registry: ../checkpoints + drop hf_sync"). The `art` tool + per-repo
+> `.artifacts.yaml` here replace `hf_sync.py`, every per-repo `hf_*.yaml`, and the `fetch_*.sh`
+> scripts. Read this plan, not the deprecated one, for the current mechanism.
+
 ## Goal
 
 Factor all heavy-artifact sync into one **registry-style generic API** over HF. Three
