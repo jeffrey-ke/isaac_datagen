@@ -123,6 +123,7 @@ Documentation, plans, style guidance, and investigation notes live in `.docs_cla
 - `.docs_claude/plans/active/` -- plans currently in progress
 - `.docs_claude/plans/completed/` -- finished plans (see `extract-isaac-datagen.md` for how this repo was extracted standalone)
 - `.docs_claude/style-and-beliefs/` -- code style and design principles
+- `.docs_claude/psc-isaac-datagen-footguns.md` -- **read before debugging a stuck PSC/Singularity render**: the operational hazard map (Vulkan ICD, RT-core-only GPU = L40S, container `.venv` rules, sibling/HF-asset sync, Slurm/backfill, optflow config, the finalize/timeout landmine)
 
 `mesh_convert.py`'s reference-image render generalizes the original `build_object_dataset.py`
 (headless Blender, ortho cam at the −Y face), preserved verbatim at
