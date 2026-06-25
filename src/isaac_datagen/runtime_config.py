@@ -44,8 +44,6 @@ class RuntimeConfig:
 
     dry_run: bool
 
-    proposer_max_occlusion: float
-
     # Phase-3 inliers: a proposal counts as an inlier only if it lies ≥ this many px
     # inside its class union mask (border margin; see vision_core.mask_utils.coords_in_mask).
     inlier_border_eps: float
@@ -62,8 +60,16 @@ class RuntimeConfig:
     # real run, then export scene.usdz + baked debug cameras/grasp-axes and the planned
     # poses for offline (Blender) inspection — skipping the writer and RTX capture.
 
-    # Phase-2 proposals: skip objects whose occlusion ratio is ≥ this. A class is
-    # kept if its best-visible member passes; NaN (unknown) never passes.
+    # Phase-2 proposer gate (reprojection-coverage): a class is proposed iff ANY of its member
+    # instances has more than this fraction of its reference texture visible in the observation —
+    # the reference RGB-D back-projected through the instance's class_to_l2w placement into the obs
+    # camera, fraction not occluded/out-of-frame. Robust to camera distance (denominator is reference
+    # points, not obs pixels). See isaac_datagen.proposal_gate.gate_classes_reproj.
+    proposer_min_visible_ratio: float = 0.30
+    proposer_tau_d: float = 0.001   # reprojection_occlusion absolute depth tolerance (m)
+    proposer_tau_r: float = 0.005   # reprojection_occlusion relative depth tolerance
+    proposer_min_visible_px: int = 60000  # DEPRECATED, ignored by the reproj gate (back-compat loading)
+    proposer_max_occlusion: float = 1.0   # DEPRECATED, ignored by the gate (kept for back-compat loading)
 
     # Phase-2 frame window (contiguous sharding): process frames
     # [start_frame, end_frame); end_frame=None → through the last frame.

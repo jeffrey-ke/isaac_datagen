@@ -1,12 +1,14 @@
 """Phase-2 pass: add proposer point-prompts to a rendered ObsMask dataset.
 
-Runs AFTER Isaac has produced the per-frame ``ObsMask``s and the per-render-dir
-``ObsMaskDescriptorMetadata`` catalog. Does NOT boot Isaac Sim — it only needs torch +
-``reference_matching``. Operates in class space: for each frame it runs the
-(expensive) proposer once per class present (against the class's canonical
-reference), skipping classes whose every member is more occluded than
-``runtime.proposer_max_occlusion``, then writes the result *residually* onto the
-existing render dir via
+Runs AFTER Isaac has produced the per-frame ``OptFlowSample``s and the per-render-dir
+``OptFlowMetadata`` catalog (an OptFlow render dir doubles as a reference-seg one). Does
+NOT boot Isaac Sim — it only needs torch + ``reference_matching``. Operates in class
+space: for each frame it runs the proposer once per gated class present (against the
+class's canonical reference), gating on **reprojection coverage** — a class is kept iff
+ANY of its member instances has more than ``runtime.proposer_min_visible_ratio`` of its
+reference texture visible in the observation (the reference RGB-D reprojected through the
+instance's ``class_to_l2w`` placement; see ``proposal_gate.gate_classes_reproj``) — then
+writes the result *residually* onto the existing render dir via
 ``PreReferenceSegSample.serialize(idx, dir, only={"proposals"})`` — so ``obs/``
 and ``cid_mask/`` are never rewritten.
 
@@ -27,8 +29,9 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata, PreReferenceSegSample
+from vision_core.datastructs import OptFlowSample, OptFlowMetadata, PreReferenceSegSample
 from vision_core.seed_utils import seed_everything
+from isaac_datagen.proposal_gate import gate_classes_reproj
 from isaac_datagen.runtime_config import load_config
 
 
@@ -39,7 +42,8 @@ def main():
     runtime = load_config(sys.argv[1], sys.argv[2:])
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
 
-    md = ObsMaskDescriptorMetadata.deserialize(0, render_dir)
+    md = OptFlowMetadata.deserialize(0, render_dir)
+    mm = md.obsmaskmeta   # ObsMaskDescriptorMetadata: class_to_ref + iid/name catalogs
 
     # Glob the real frame files (not iterdir) so a stray tmp dotfile from a
     # hard-killed phase-1 run can't inflate the count.
@@ -67,20 +71,20 @@ def main():
     on_cuda = torch.device(device).type == "cuda"
 
     total_pts = 0
+    ref_cache: dict = {}   # class -> dense reference surface points, computed once across frames
     bar = tqdm(range(start, end), desc=f"{render_dir.name}[{start}:{end}]", unit="frame")
     for idx in bar:
         if idx in done:
             continue
         seed_everything(runtime.effective_seed + idx)   # per-frame: sharding-invariant RNG
-        om = ObsMask.deserialize(idx, render_dir)
-        present_iids = {int(i) for i in om.iid_mask.unique().tolist()} & set(md.iid_to_name)
-        # Occlusion gate (iid space, then join iid → name → class): a class is kept
-        # if ANY member is visible enough (best-visible member). NaN (unknown
-        # occlusion) compares False and is dropped.
-        visible_iids = {iid for iid in present_iids
-                        if om.iid_to_occlusion[iid] < runtime.proposer_max_occlusion}
-        classes = {md.name_to_class[md.iid_to_name[iid]] for iid in visible_iids}
-        names = sorted(classes & set(md.class_to_ref))
+        s = OptFlowSample.deserialize(idx, render_dir)
+        om = s.obsmask
+        # Reprojection-coverage gate: keep a class if ANY member instance has more than
+        # proposer_min_visible_ratio of its reference texture visible (best-visible member).
+        # See proposal_gate.gate_classes_reproj.
+        gated = gate_classes_reproj(s, md, runtime.proposer_min_visible_ratio,
+                                    runtime.proposer_tau_d, runtime.proposer_tau_r, ref_cache)
+        names = sorted(set(gated) & set(mm.class_to_ref))
         if not names:
             tqdm.write(f"  frame {idx:04d}: no visible labeled references — writing empty proposals")
 
@@ -91,7 +95,7 @@ def main():
             inner = tqdm(names, desc=f"  ↳ f{idx:04d}", unit="ref", leave=False)
             for name in inner:
                 inner.set_postfix_str(name)  # which class is matching right now
-                ref_b = md.class_to_ref[name].unsqueeze(0).to(device)
+                ref_b = mm.class_to_ref[name].unsqueeze(0).to(device)
                 # proposer returns list[(xy (M,2), scores (M,))] per batch element
                 xy, _scores = proposer(obs_b, ref_b)[0]
                 # A class that passes the occlusion gate but yields no matches is
