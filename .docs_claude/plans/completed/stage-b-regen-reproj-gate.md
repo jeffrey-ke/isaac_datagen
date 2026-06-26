@@ -1,13 +1,17 @@
-# Stage B — proposal/label regen under the reproj-coverage gate (in progress)
+# Stage B — proposal/label regen under the reproj-coverage gate (COMPLETE)
 
-> **Status (2026-06-25):** Stage A DONE + ycb_can ref-pose bug fixed. **Stage B regen DONE** — all 9
-> render dirs (`mixed-persp` 6×125, `shelf-optflow` 3×300 = 1,650 frames): `proposals/`+`labels/`+`stats/`
-> regenerated under the reproj gate + grid proposer; `verified_proposals/`+`verification/` dropped
-> everywhere. Design: `~/.claude/plans/jaunty-skipping-widget.md`. Completed write-up of the gate + ycb
-> fix: `plans/completed/reproj-coverage-gate-and-ycb-ref-pose-fix.md`. **`expanded-refseg` DONE** — its
-> two legacy reference-seg dirs (render000/001) re-rendered in `mode: optflow`, cleandift backbone re-added,
-> all 3 dirs regenerated under the reproj gate. Plan: `~/.claude/plans/golden-discovering-donut.md`.
-> **Next: fresh split freeze (now over ALL 12 dirs) → verifier retrain → re-bake verified_proposals.**
+> **Status (2026-06-25): DONE — reproj gating finished end-to-end across all 3 datasets.** Stage A gate +
+> ycb_can ref-pose fix DONE. **Stage B regen DONE on all 12 render dirs** — `mixed-persp` (6), `shelf-optflow`
+> (3), and `expanded-refseg` (3): `proposals/`+`labels/`+`stats/` regenerated under the reproj gate + grid
+> proposer; `verified_proposals/`+`verification/` dropped everywhere. `expanded-refseg`'s two legacy
+> reference-seg dirs (render000/001) were first re-rendered in `mode: optflow` (+ cleandift backbone re-added).
+> **Split re-frozen over all 12 dirs** → `datasets/splits/refseg_split.json` (31,698 keys, ~10% val/root).
+> Design: `~/.claude/plans/jaunty-skipping-widget.md`. Write-ups:
+> `plans/completed/{reproj-coverage-gate-and-ycb-ref-pose-fix.md, expanded-refseg-optflow-regen.md}`.
+>
+> **Downstream (separate effort, NOT part of reproj gating):** the verifier retrain on the regenerated data
+> + `verified_proposals/` re-bake are tracked by `segmentation/.docs_claude/plans/active/hpo-psc-bringup.md`
+> (GPU timing job + real sweep array still to run). They consume this regen; they don't gate its completion.
 
 ## What's done
 - **Stage A gate (code):** reprojection-coverage gate replaces the visible-pixel floor. Files:
@@ -72,17 +76,20 @@ the dir). 6 overrides, all path/device/threshold (no behavior change): grid prop
 `intrinsics_path`/`descriptor_config_path` (snapshot relatives don't resolve from cwd), cpu, 0.30 ratio.
 The new gate fields auto-default since the snapshot predates them.
 
-## Next steps
-1. **Fresh split freeze:** re-run `segmentation.verifier.freeze_split` over **all regenerated data —
-   `mixed-persp` + `shelf-optflow` + `expanded-refseg` (12 render dirs)** (verifier index is
-   `proposals`-derived; `verified ⊆ proposals` keeps gligen in lockstep) → `datasets/splits/
-   refseg_split.json`; `dspush splits`. No assignment preserved (retraining anyway); the `expanded-refseg`
-   re-render reused `renderNNN/frame` keys over fresh RNG content, so re-freezing dissolves the collision.
-2. **Retrain the verifier** on grid proposals, then re-bake `verified_proposals/` (`segmentation.verifier.
-   process`) for gligen.
-3. **Cleanups:** formalize `fix_ycb_ref_pose.py` as a tracked `isaac_datagen` migrate script; fix the
-   `isaac-datagen-viz-inliers` `classes=` bug. Sweep other classes for systematically-low ratios (same
-   reference-pose bug class).
+## Done in this effort
+1. ✅ **Stage A** — reproj-coverage gate code + ycb_can ref-pose fix.
+2. ✅ **Stage B regen** — grid proposals + reproj gate + inliers on all 12 render dirs; stale
+   `verified_proposals/`+`verification/` dropped.
+3. ✅ **expanded-refseg** — optflow re-render of render000/001 + cleandift backbone re-add + Stage B.
+4. ✅ **Fresh split freeze** — `segmentation.verifier.freeze_split` over all 12 dirs →
+   `datasets/splits/refseg_split.json` (31,698 keys). (`dspush splits` left to the user's discretion.)
+
+## Downstream (separate efforts — out of scope for reproj gating)
+- **Verifier retrain** on the regenerated grid proposals + **`verified_proposals/` re-bake**
+  (`segmentation.verifier.process`) for gligen — tracked by
+  `segmentation/.docs_claude/plans/active/hpo-psc-bringup.md` (GPU timing job + real sweep array pending).
+- **Cleanups:** formalize `fix_ycb_ref_pose.py` as a tracked `isaac_datagen` migrate script; fix the
+  `isaac-datagen-viz-inliers` `classes=` bug; sweep other classes for systematically-low ratios.
 
 ## Caveats
 - ycb_can fix is **pose-only**: the asset's reference *image/depth* still show the original face (fine for
