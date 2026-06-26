@@ -81,6 +81,7 @@ Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_da
 | `hardwares.py` | ZED Mini stereo camera rig | `ZedMini` |
 | `stereo_writer.py` | Replicator Writer → `StereoSample` | `StereoSampleWriter` |
 | `reference_seg_writer.py` | Replicator Writer → `ProtoReferenceSegSample` (precomputes DIFT ref features) | `ProtoReferenceSegWriter` |
+| `make_unseen.py` | `isaac-datagen-unseen`: build a channel-swap 'unseen 0-shot' eval render dir — subset+renumber frames of a phase-1 dir with R/B-flipped obs (`SwapRedBlue`), flip refs + refill descriptors via the `add-backbone` CLI, re-run phases 2/3 (all sub-steps via public `python -m`). Output stays OUT of train/val; consumed as the verifier's `viz/unseen` batch | `main` |
 | `mesh_convert.py` | Build a `GraspableObject` dataset from arbitrary meshes (+ YCB download): stage candidate renders, then finalize winners | `convert`, `finalize`, `ycb_download` |
 | `mesh_blender.py` | Blender worker: mesh → `/World` usdz + 4 side-face ortho reference tiles | (run via `blender --background`) |
 

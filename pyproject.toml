@@ -40,6 +40,8 @@ isaac-datagen-downsample-proposals = "isaac_datagen.downsample_proposals:main"
 isaac-datagen-inliers = "isaac_datagen.add_inlier_data:main"
 # all three phases as one command (each phase its own subprocess; re-runnable).
 isaac-datagen-pipeline = "isaac_datagen.run_pipeline:main"
+# channel-swap 'unseen 0-shot' eval dir: subset+flip a phase-1 dir, re-encode refs, re-run phases 2/3.
+isaac-datagen-unseen = "isaac_datagen.make_unseen:main"
 # debug (opt-in): dry-run export (scene.usdz + planned poses) -> Blender orbit + pose-sanity renders.
 isaac-datagen-debug-render = "isaac_datagen.debug_render:main"
 # viz (no Isaac): sanity-check the inlier/outlier labels on a rendered dataset.
