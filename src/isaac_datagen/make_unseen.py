@@ -84,13 +84,14 @@ def _parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     p.add_argument("--split-manifest", dest="split_manifest")
     p.add_argument("--split", default="val")
     p.add_argument("--limit", type=int)
-    # OmegaConf dotlist (key=value); they have no leading '-' so they land here, not as flags.
-    p.add_argument("overrides", nargs="*", default=[])
-    return p.parse_args(argv), []
+    # The trailing OmegaConf dotlist (key=value) lands in `overrides` via parse_known_args — a nargs='*'
+    # positional can't reliably follow optionals like --limit, so let argparse pass them through.
+    args, overrides = p.parse_known_args(argv)
+    return args, overrides
 
 
 def main() -> None:
-    args, _ = _parse_args(sys.argv[1:])
+    args, overrides = _parse_args(sys.argv[1:])
     src = Path(args.source_render_dir)
     n_src = len(list((src / "obs").glob("obs_*.png")))
 
@@ -106,7 +107,7 @@ def main() -> None:
     if max(frames) >= n_src:
         sys.exit(f"frame {max(frames)} exceeds source frame count {n_src} in {src / 'obs'}")
 
-    runtime = load_config(args.config, args.overrides)
+    runtime = load_config(args.config, overrides)
     dst = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     if dst.exists():
         sys.exit(f"dst {dst} exists — pick a fresh idx/dataset_dir (won't overwrite)")
@@ -142,7 +143,7 @@ def main() -> None:
     # 4 + 5. phases 2/3 via their public module entrypoints, inheriting THIS cwd (the isaac configs'
     # src/isaac_datagen base). Forward the SAME dotlist so the subprocess resolves the identical
     # dataset_dir/idx/proposer settings this run used.
-    _run("isaac_datagen.add_proposals", args.config, *args.overrides)
+    _run("isaac_datagen.add_proposals", args.config, *overrides)
     _run("isaac_datagen.add_inlier_data", str(dst), "--eps", str(runtime.inlier_border_eps))
     print(f"\nunseen render dir ready: {dst}", flush=True)
 
