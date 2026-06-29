@@ -58,7 +58,7 @@ occluder_scale: 0.06
 # once per visible class and keys by class, so phase 3 labels each grid against that
 # class's union mask. Grid ignores the reference; swap to random_proposal.yaml for
 # stochastic coverage. Tune num_w/num_h in the proposer config.
-proposer_config_path: ../../../reference_matching/src/reference_matching/configs/random_proposal.yaml
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
 
 # Raised from 0.25: grid coverage is matcher-independent, so emit anchors even for
 # heavily-occluded classes. 1.0 keeps any class with at least one visible pixel
