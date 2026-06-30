@@ -4,12 +4,15 @@ scene: empty
 dataset_dir: datasets/staggered
 intrinsics_path: zed_K.npy
 # Like mixed.yaml, but the until-exhausted column stacker also staggers each column to a
-# random world-y depth (min_y..max_y) so the wall of stacks isn't coplanar at y=0.
+# random world-y depth (min_y..max_y) so the wall of stacks isn't coplanar at y=0, and
+# jitters the horizontal x-gap between columns (min_gap..max_gap) instead of a fixed EPSILON.
 placement: UntilExhaustedStacker
 placement_args:
   column_height: 5
   min_y: 0.0
-  max_y: 0.10   # 10 cm of front-to-back stagger (USD meters)
+  max_y: 0.10    # 10 cm of front-to-back stagger (USD meters)
+  min_gap: 0.002 # existing fixed spacing as the floor
+  max_gap: 0.03  # up to 3 cm of extra horizontal spacing between columns
 num_frames: 5
 descriptor_device: cuda:1
 proposer_device: cuda:0

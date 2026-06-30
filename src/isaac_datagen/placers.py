@@ -47,7 +47,8 @@ class UntilExhaustedStacker:
 
     EPSILON = 0.002
 
-    def __init__(self, prim_paths, column_height, min_y=0, max_y=0):
+    def __init__(self, prim_paths, column_height, min_y=0, max_y=0,
+                 min_gap=EPSILON, max_gap=EPSILON):
         if column_height < 1:
             raise ValueError(f"column_height must be >= 1, got {column_height}")
         if len(prim_paths) < 1:
@@ -65,13 +66,17 @@ class UntilExhaustedStacker:
 
         # Per-column footprint width = widest member's x-extent.
         col_widths = np.array([max(sizes[p][0] for p in col) for col in self.columns])
-        total_w = col_widths.sum() + (len(self.columns) - 1) * self.EPSILON
+        # One random x-gap per column boundary (N-1 gaps for N columns); min_gap==max_gap==
+        # EPSILON (the default) reproduces the old constant spacing exactly.
+        gaps = np.random.uniform(min_gap, max_gap, size=len(self.columns) - 1)
+        total_w = col_widths.sum() + gaps.sum()
 
         # x: column left edges march left->right (a "range" whose step is each column's
-        #    own width + gap), centered on x=0; column center = left edge + half width.
+        #    own width + a possibly-jittered gap), centered on x=0; column center = left
+        #    edge + half width.
         # y: one uniform-random depth per column (min_y==max_y==0 -> flat wall, default).
         left_edges = -total_w / 2.0 + np.concatenate(
-            [[0.0], np.cumsum(col_widths[:-1] + self.EPSILON)]
+            [[0.0], np.cumsum(col_widths[:-1] + gaps)]
         )
         col_xs = (left_edges + col_widths / 2.0).tolist()
         col_ys = np.random.uniform(min_y, max_y, size=len(self.columns)).tolist()
