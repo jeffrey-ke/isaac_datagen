@@ -14,6 +14,8 @@ from __future__ import annotations
 import sys
 from collections import deque
 
+import numpy as np
+
 from isaac_datagen.isaac_utils import local_bbox_range, class_label
 
 
@@ -24,18 +26,32 @@ def get(name: str):
         raise KeyError(name) from e
 
 
+def _stage():
+    from isaacsim.core.utils.stage import get_current_stage
+    return get_current_stage()
+
+
+def size_of(prim_path):
+    """(sx, sy, sz) local bbox extent of the prim at prim_path."""
+    sz = local_bbox_range(_stage().GetPrimAtPath(prim_path)).GetSize()
+    return (sz[0], sz[1], sz[2])
+
+
+def center_of(prim_path):
+    """(cx, cy, cz) local bbox midpoint of the prim at prim_path."""
+    mid = local_bbox_range(_stage().GetPrimAtPath(prim_path)).GetMidpoint()
+    return (mid[0], mid[1], mid[2])
+
+
 class UntilExhaustedStacker:
 
     EPSILON = 0.002
 
-    def __init__(self, prim_paths, column_height):
+    def __init__(self, prim_paths, column_height, min_y=0, max_y=0):
         if column_height < 1:
             raise ValueError(f"column_height must be >= 1, got {column_height}")
         if len(prim_paths) < 1:
             raise ValueError("UntilExhaustedStacker needs >= 1 object")
-
-        from isaacsim.core.utils.stage import get_current_stage
-        stage = get_current_stage()
 
         # Columns of prim paths (deques so the "top" is unambiguous: last pushed).
         self.columns = [
@@ -44,32 +60,35 @@ class UntilExhaustedStacker:
         ]
 
         # Measure size + center per prim once, from the loaded stage prims.
-        size, center = {}, {}
-        for p in prim_paths:
-            rng = local_bbox_range(stage.GetPrimAtPath(p))
-            sz, mid = rng.GetSize(), rng.GetMidpoint()
-            size[p] = (sz[0], sz[1], sz[2])
-            center[p] = (mid[0], mid[1], mid[2])
+        sizes = {p: size_of(p) for p in prim_paths}
+        centers = {p: center_of(p) for p in prim_paths}
 
-        # Column footprint width = widest member's x-extent; center the wall on x=0.
-        col_widths = [max(size[p][0] for p in col) for col in self.columns]
-        total_w = sum(col_widths) + (len(self.columns) - 1) * self.EPSILON
-        left_edge = -total_w / 2.0
+        # Per-column footprint width = widest member's x-extent.
+        col_widths = np.array([max(sizes[p][0] for p in col) for col in self.columns])
+        total_w = col_widths.sum() + (len(self.columns) - 1) * self.EPSILON
+
+        # x: column left edges march left->right (a "range" whose step is each column's
+        #    own width + gap), centered on x=0; column center = left edge + half width.
+        # y: one uniform-random depth per column (min_y==max_y==0 -> flat wall, default).
+        left_edges = -total_w / 2.0 + np.concatenate(
+            [[0.0], np.cumsum(col_widths[:-1] + self.EPSILON)]
+        )
+        col_xs = (left_edges + col_widths / 2.0).tolist()
+        col_ys = np.random.uniform(min_y, max_y, size=len(self.columns)).tolist()
+        self.columns_xy = list(zip(col_xs, col_ys))
 
         self._placements = {}  # prim_path -> (translation, rotation)
-        for col, col_w in zip(self.columns, col_widths):
-            col_x = left_edge + col_w / 2.0
+        for col, (col_x, col_y) in zip(self.columns, self.columns_xy):
             floor_z = 0.0
             for p in col:  # bottom -> top
-                sx, sy, sz = size[p]
-                cx, cy, cz = center[p]
+                sx, sy, sz = sizes[p]
+                cx, cy, cz = centers[p]
                 # set_transform places the prim ORIGIN; the bbox center lands at
                 # origin + (cx,cy,cz), so subtract the midpoint per axis to seat
-                # the centroid on (col_x, 0) and the bbox base at floor_z.
-                translation = (col_x - cx, -cy, floor_z - cz + sz / 2.0)
+                # the centroid on (col_x, col_y) and the bbox base at floor_z.
+                translation = (col_x - cx, col_y - cy, floor_z - cz + sz / 2.0)
                 self._placements[p] = (translation, (0.0, 0.0, 0.0))
                 floor_z += sz + self.EPSILON
-            left_edge += col_w + self.EPSILON
 
     def __call__(self, prim_path):
         return self._placements[prim_path]
