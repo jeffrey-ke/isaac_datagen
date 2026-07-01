@@ -1,0 +1,77 @@
+# expanded-refseg-v2 — optflow re-render config (curated 8-class amazon subset + depth jitter).
+#
+# Like expanded-refseg.yaml but: (1) reads the pre-filtered 8-instance catalog
+# assets/optflow_objects/amazon-v2/ (blue/brown/burgundy/cyan/green/orange/pink/red — one box per
+# class), so NO RegexFilter is needed; (2) the UntilExhaustedStacker staggers columns across world-y
+# depth (min_y/max_y); (3) writes to datasets/expanded-refseg-v2. Drive each render dir per-dir:
+#   isaac-datagen configs/expanded-refseg-v2.yaml idx=0 num_frames=100 num_targets=10
+#   isaac-datagen configs/expanded-refseg-v2.yaml idx=1 num_frames=100 num_targets=10
+#   isaac-datagen configs/expanded-refseg-v2.yaml idx=2 num_frames=100 num_targets=10
+# (obs = num_frames * num_targets; dir count + sizes are free parameters — confirm before rendering.)
+
+mode: optflow                      # MANDATORY (no default); baked so no CLI flag is needed
+scene: empty
+seed: 1                            # effective_seed = seed + idx -> distinct RNG per dir
+idx: 0                             # overridden per dir
+num_targets: 10                    # overridden per dir
+num_frames: 100                    # overridden per dir
+dataset_dir: /data/user/jeffk/datasets/expanded-refseg-v2   # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:1          # GPU — Phase 1 precomputes the DIFT reference features
+proposer_device: cpu               # baked so the dir's runtime.yaml already matches Stage B
+                                   # (grid proposer is reference-free, no NN -> CPU)
+
+dome_light: True
+dry_run: False
+
+# Placement / poses — UntilExhaustedStacker with y-depth jitter (min_y/max_y stagger columns
+# front-to-back instead of a flat wall at y=0).
+placement: UntilExhaustedStacker
+placement_args:
+  column_height: 3
+  min_y: 0.0
+  max_y: 0.10                      # 10cm front-to-back (world-y depth) stagger (USD meters)
+  min_gap: 0.0
+  max_gap: 0.50                    # up to 50cm horizontal (x) gap jitter between columns
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.25, 0.85]
+yrange: [-0.42, 0.42]
+zrange: [-0.40, 0.40]
+
+# Curated 8-instance amazon catalog (relative to src/isaac_datagen/). Pre-filtered, so no RegexFilter.
+objects_path:
+  - ../../assets/optflow_objects/amazon-v2/
+obs_full_alpha: False
+filter_specs:
+  - name: ReplicateFilter
+    args: {key: name, value: 'amazon_*', count: 5}
+  - name: ShuffleFilter
+    args:
+      seed: ${idx}
+
+# Lighting / exposure — render002 values.
+distant_light: True
+distant_intensity: 2000.0
+distant_angle: 0.53
+distant_light_offset: [1.0, -3.0, 3.0]
+dome_fill_intensity: 200.0
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32
+
+# Proposer / gate — bake the grid proposer + reproj-coverage gate into runtime.yaml so the baked
+# snapshot is honest for Stage B (Stage B re-overrides these on the CLI regardless).
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+proposer_min_visible_ratio: 0.30   # reproj-coverage gate threshold (fraction of ref texture visible)
+
+# Phase-3 inliers: border margin (px) a proposal must keep inside its class union mask.
+inlier_border_eps: 0.0             # amazon convention (render002 + mixed-persp amazon use 0.0)
