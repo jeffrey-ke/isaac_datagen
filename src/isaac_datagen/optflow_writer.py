@@ -27,6 +27,8 @@ from torchvision import tv_tensors
 
 from omni.replicator.core import AnnotatorRegistry, Writer
 
+from vision_core.pose_utils import instance_visibility   # datastruct-tied; single-sourced in vision_core
+
 from isaac_datagen.stereo_writer import camera_params_to_world2cam
 from isaac_datagen.reference_seg_writer import reference_catalog, obsmask_from_data, obsmask_metadata
 from isaac_datagen.objects import OptFlowSample, OptFlowMetadata
@@ -55,6 +57,8 @@ class OptFlowWriter(Writer):
         self._frame_id = 0
         self._full_alpha = full_alpha
         self.iid_to_name: dict[int, str] = {}   # accumulated per frame (iids are session-local)
+        self._md = None            # per-dir OptFlowMetadata; built once, iid_to_name refreshed each frame
+        self._ref_cache = {}       # class -> dense reference surface points, computed once across frames
         # The same per-class catalog ObsMaskWriter builds (cids, refs, DIFT descriptors): the only NN forward.
         (self.class_to_cid, self.name_to_class,
          self.class_to_ref, self.class_to_descriptors, self.backbone) = reference_catalog(
@@ -75,35 +79,49 @@ class OptFlowWriter(Writer):
         depth = np.asarray(rp["distance_to_image_plane"]["data"], dtype=np.float32)        # full frame
         cam2world = np.linalg.inv(camera_params_to_world2cam(rp["camera_params"]))         # OpenCV cam2world
 
-        OptFlowSample(
+        sample = OptFlowSample(
             obsmask=obsmask,                 # serialized FLAT → obs/ iid_mask/ cid_mask/ iid_to_occlusion/
             observation_depth=depth,
             cam2world=cam2world.astype(np.float32),
-        ).serialize(self._frame_id, self._render_dir)
+            iid_to_visibility={},            # filled next: instance_visibility reads `sample`
+        )
+        # No tau args → instance_visibility's 0.001/0.005 defaults, identical to m2f-precompute-vis.
+        sample.iid_to_visibility = instance_visibility(
+            sample, self._optflow_metadata(), ref_cache=self._ref_cache)
+        sample.serialize(self._frame_id, self._render_dir)
         self._frame_id += 1
+
+    def _optflow_metadata(self) -> OptFlowMetadata:
+        """The per-dir constants as an OptFlowMetadata. Built once (all inputs ready at construction);
+        only obsmaskmeta.iid_to_name grows across frames, so refresh just that field on each call.
+        Shared by per-frame instance_visibility and finalize_metadata — no duplicated assembly."""
+        if self._md is None:
+            by_class = defaultdict(list)                                   # class → [(object, l2w), ...]
+            for o, L in zip(self._objects, self._l2w):
+                by_class[o.meta["class"]].append((o, L))
+            rep = {c: members[0][0] for c, members in by_class.items()}    # representative object per class
+            self._md = OptFlowMetadata(
+                obsmaskmeta=obsmask_metadata(self.class_to_cid, self.name_to_class,
+                                             self.class_to_ref, self.class_to_descriptors,
+                                             self.iid_to_name, self.backbone),
+                obs_intrinsics=np.asarray(self._obs_K, dtype=np.float32),
+                class_to_name={c: [o.meta["name"] for o, _ in members] for c, members in by_class.items()},
+                class_to_reference={
+                    c: tv_tensors.Image(torch.from_numpy(np.array(o.reference_image)).permute(2, 0, 1))
+                    for c, o in rep.items()
+                },
+                class_to_reference_depth={c: torch.from_numpy(o.reference_depth).float() for c, o in rep.items()},
+                class_to_ref_intrinsics={c: torch.from_numpy(o.ref_intrinsics).float() for c, o in rep.items()},
+                class_to_ref_pose={c: torch.from_numpy(o.ref_pose).float() for c, o in rep.items()},
+                class_to_l2w={
+                    c: torch.from_numpy(np.stack([L for _, L in members])).float()
+                    for c, members in by_class.items()
+                },
+            )
+        self._md.obsmaskmeta.iid_to_name = dict(self.iid_to_name)          # refresh accumulated map
+        return self._md
 
     def finalize_metadata(self, directory: str | Path | None = None):
         """Write the per-render-dir constants once (at idx=0). Call after capture."""
         directory = Path(directory) if directory is not None else self._render_dir
-        by_class = defaultdict(list)                                   # class → [(object, l2w), ...]
-        for o, L in zip(self._objects, self._l2w):
-            by_class[o.meta["class"]].append((o, L))
-        rep = {c: members[0][0] for c, members in by_class.items()}    # representative object per class
-        OptFlowMetadata(
-            obsmaskmeta=obsmask_metadata(self.class_to_cid, self.name_to_class,
-                                         self.class_to_ref, self.class_to_descriptors,
-                                         self.iid_to_name, self.backbone),
-            obs_intrinsics=np.asarray(self._obs_K, dtype=np.float32),
-            class_to_name={c: [o.meta["name"] for o, _ in members] for c, members in by_class.items()},
-            class_to_reference={
-                c: tv_tensors.Image(torch.from_numpy(np.array(o.reference_image)).permute(2, 0, 1))
-                for c, o in rep.items()
-            },
-            class_to_reference_depth={c: torch.from_numpy(o.reference_depth).float() for c, o in rep.items()},
-            class_to_ref_intrinsics={c: torch.from_numpy(o.ref_intrinsics).float() for c, o in rep.items()},
-            class_to_ref_pose={c: torch.from_numpy(o.ref_pose).float() for c, o in rep.items()},
-            class_to_l2w={
-                c: torch.from_numpy(np.stack([L for _, L in members])).float()
-                for c, members in by_class.items()
-            },
-        ).serialize(0, directory)
+        self._optflow_metadata().serialize(0, directory)                  # iid_to_name now fully accumulated
