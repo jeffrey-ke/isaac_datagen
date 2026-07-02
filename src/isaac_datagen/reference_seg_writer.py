@@ -26,8 +26,7 @@ from omni.replicator.core import AnnotatorRegistry, Writer
 
 import yaml
 
-from vision_core.datastructs import ObsMask, ObsMaskDescriptorMetadata, SubfolderDict
-from vision_core.viz import fit_pca_basis
+from vision_core.datastructs import ObsMask, build_obsmask_metadata
 
 from isaac_datagen.isaac_utils import cid_iid_masks
 
@@ -155,17 +154,11 @@ def obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descrip
     the same ``flatten(1).T`` tokenization consumers read), so every class projects into
     comparable colors. ``class_to_descriptors`` and ``principal_components`` are stored as
     ``SubfolderDict``s keyed by ``backbone`` (the descriptor registry name), so other backbones can be
-    added beside this one without re-rendering.
+    added beside this one without re-rendering. Delegates to the shared ``vision_core`` builder so the
+    real-world testset converter emits a byte-identical catalog.
     """
-    tokens = torch.cat([d.flatten(1).T for d in class_to_descriptors.values()], dim=0)
-    return ObsMaskDescriptorMetadata(
-        iid_to_name=iid_to_name,
-        cid_to_class={cid: cls for cls, cid in class_to_cid.items()},
-        name_to_class=name_to_class,
-        class_to_ref=class_to_ref,
-        class_to_descriptors=SubfolderDict({backbone: class_to_descriptors}),
-        principal_components=SubfolderDict({backbone: fit_pca_basis(tokens, n=3)}),
-    )
+    return build_obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descriptors,
+                                  iid_to_name, backbone)
 
 
 class ObsMaskWriter(Writer):
