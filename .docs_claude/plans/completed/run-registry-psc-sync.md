@@ -17,6 +17,18 @@
 > and relies on rsync creating the leaf under the pre-existing `segmentation/runs/`. Lesson:
 > [[verify-deps-before-asserting]] — a data-mover host is not a general shell host; probe the
 > transport's real constraints before shelling out.
+>
+> **Sweep awareness (2026-07-03, dotfiles `184eb45` rsync-only, `806b58d` sweep/drill-in):** the
+> §3 list modeled every top-level dir under `runs/` as a run, but some are **folders-of-runs** —
+> HPO sweep umbrellas (`m2f-fullgrid-hpo-v3/t0..t90`, `m2ffix/<arm>`), each child a full run with
+> its own `checkpoints/config/hparams/metrics`. `list` now labels each entry **KIND = `run` |
+> `sweep`** by probing whether it *directly* holds `hparams.yaml` (Lightning's one-per-run marker;
+> a bounded 1-level `rsync --list-only -r --include=/*/ --include=/*/hparams.yaml --exclude=*`,
+> wandb/viz pruned so it stays ~instant). `run list <remote> <name>` **drills into** a sweep to
+> list its arms; and because a run `<name>` is used verbatim as a path segment, `pull`/`push`
+> already accept an **arm path** — `run pull psc m2f-fullgrid-hpo-v3/t40` fetches just the best
+> trial (~333 MB) instead of the whole ~29 G sweep. The table columns are now `RUN · KIND · MTIME
+> · [CKPT] · LOCAL` (mtime from the shallow listing; CKPT still opt-in `--size`).
 
 # `run` — a name-keyed training-run registry over PSC
 
