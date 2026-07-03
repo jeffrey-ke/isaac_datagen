@@ -21,14 +21,20 @@ beside the existing one(s) in both `class_to_descriptors/` and `principal_compon
 CleanDIFT-on-disk step (e.g. our finetuned CleanDIFT) — minutes, no Isaac Sim. The descriptor forward is
 the expensive part, so the descriptor is built once and reused across render dirs.
 
-`class_to_descriptors[backbone][cls]` is a SINGLE `(C, h, w)` grid (consumers do `.flatten(1).T` /
-`.shape[0]`), so the config MUST be a single-scale descriptor (e.g. `cleandift_finetuned.yaml` ->
-CleanDiftFinetunedDescriptor). An FPN config returns a list of volumes and would fail the `.squeeze(0)`
-below — FPN backbones are the verifier's runtime observation `provider`, not stored ref tokens.
+`class_to_descriptors[backbone][cls]` is EITHER a single `(C, h, w)` grid (single-scale descriptors —
+`DiftDescriptor`/CleanDIFT) OR, for a keyed multi-scale FPN, a `{scale_key: (C_k, h_k, w_k)}` dict — the
+shape each descriptor declares via its `to_leaf`. The multi-scale FPN leaf feeds the GLIGEN M2F segmenter's
+`MultiScaleRefEncoder` (per-scale round-robin reference conditioning); `torch.save` persists the dict
+natively, so no serializer change. Both forms coexist under `class_to_descriptors/<backbone>/`.
 
+    # single-scale (CleanDIFT):
     cd isaac_datagen && env -u PYTHONPATH uv run python -m isaac_datagen.migrate_descriptors_backbone \
         add-backbone /data/user/jeffk/datasets/expanded-refseg \
         ../reference_matching/src/reference_matching/configs/cleandift_finetuned.yaml --device cuda
+    # multi-scale (DiftFpn keys 0/1/2 -> the DiftFpn backbone the M2F encoder reads):
+    cd isaac_datagen && env -u PYTHONPATH uv run python -m isaac_datagen.migrate_descriptors_backbone \
+        add-backbone /data/user/jeffk/datasets/expanded-refseg \
+        ../reference_matching/src/reference_matching/configs/fpn_dift.yaml --device cuda
 """
 import argparse
 from pathlib import Path
@@ -72,31 +78,52 @@ def _has_backbone(rd: Path, field: str, backbone: str, idx: int = 0) -> bool:
     return isinstance(manifest, list) and backbone in manifest
 
 
-def _add_backbone_render_dir(rd: Path, descriptor, backbone: str, device: str) -> int:
+def _pca_basis(class_to_descriptors: dict):
+    """Per-backbone PCA→RGB viz basis, fit over ALL classes' tokens. Single-scale tensor leaves → one
+    basis (unchanged). Keyed multi-scale leaves (`{scale: (C_k,h,w)}`) → one basis PER scale, since
+    per-scale channels differ and can't share a basis; stored as `{scale: basis}`."""
+    sample = next(iter(class_to_descriptors.values()))
+    if torch.is_tensor(sample):
+        tokens = torch.cat([d.flatten(1).T for d in class_to_descriptors.values()], dim=0)
+        return fit_pca_basis(tokens, n=3)
+    return {k: fit_pca_basis(
+                torch.cat([leaf[k].flatten(1).T for leaf in class_to_descriptors.values()], dim=0), n=3)
+            for k in sample}
+
+
+def _add_backbone_render_dir(rd: Path, descriptor, backbone: str, device: str, overwrite: bool = False) -> int:
     """Re-encode the stored `class_to_ref` with `descriptor` and write its `backbone` subfolder into both
-    catalog fields. Skips the (expensive) forward when both fields already carry `backbone`."""
-    if all(_has_backbone(rd, f, backbone) for f in _FIELDS):
+    catalog fields. Skips the (expensive) forward when both fields already carry `backbone` — UNLESS
+    `overwrite`, which re-encodes and REPLACES the existing value files in place (the manifest is left as-is
+    since the key already exists). Use `overwrite` to re-bake the same backbone name with different keys
+    (e.g. CleanDiftFinetunedFpn {0,1,2} -> {1,2,3}); the value file holds the whole `{scale: tensor}` leaf,
+    so the replace is total (no stale scale lingers). The stored leaf shape (single `(C,h,w)` grid vs keyed
+    `{scale: (C_k,h,w)}` dict) is whatever the descriptor's `to_leaf` declares — no shape-sniffing here."""
+    if not overwrite and all(_has_backbone(rd, f, backbone) for f in _FIELDS):
         return 0
     # Read only the reference images — not the whole catalog (which would eagerly load every backbone).
     class_to_ref = ObsMaskDescriptorMetadata.deserialize_field(0, rd, "class_to_ref")
-    with torch.inference_mode():                          # (C, h, w) per class, mirrors reference_catalog
+    # Every descriptor owns two contract methods: `prep` (public preprocessing) and `to_leaf` (forward
+    # output -> stored catalog leaf). No prep/shape sniffing here — single-scale and keyed FPN are uniform.
+    with torch.inference_mode():
         class_to_descriptors = {
-            cls: descriptor(ref.unsqueeze(0).to(device)).squeeze(0).cpu()
+            cls: descriptor.to_leaf(descriptor(descriptor.prep(ref).unsqueeze(0).to(device)))
             for cls, ref in class_to_ref.items()
         }
-    # PCA→RGB basis is per-backbone, fit over ALL classes' tokens (same flatten(1).T tokenization).
-    tokens = torch.cat([d.flatten(1).T for d in class_to_descriptors.values()], dim=0)
-    pca = fit_pca_basis(tokens, n=3)
-    return (add_backbone_to_subfolder(rd, "class_to_descriptors", backbone, class_to_descriptors)
-            + add_backbone_to_subfolder(rd, "principal_components", backbone, pca))
+    pca = _pca_basis(class_to_descriptors)
+    return (add_backbone_to_subfolder(rd, "class_to_descriptors", backbone, class_to_descriptors, overwrite=overwrite)
+            + add_backbone_to_subfolder(rd, "principal_components", backbone, pca, overwrite=overwrite))
 
 
-def _add_backbone(dataset_root: Path, descriptor_config: Path, device: str) -> None:
+def _add_backbone(dataset_root: Path, descriptor_config: Path, device: str, overwrite: bool = False) -> None:
     backbone = yaml.safe_load(descriptor_config.read_text())["name"]   # SubfolderDict key == registry name
     from reference_matching import descriptor as descriptor_module
     descriptor = descriptor_module.from_config(str(descriptor_config)).to(device)   # built ONCE, reused
+    # root_fallback: a flat dataset (marker at the root, no render*/ wrapper — e.g. the real-world
+    # testset re-emitted as a single render dir) is baked as one dir, matching how the readers consume it.
     for_each_render_dir(dataset_root,
-                        lambda rd: _add_backbone_render_dir(rd, descriptor, backbone, device))
+                        lambda rd: _add_backbone_render_dir(rd, descriptor, backbone, device, overwrite),
+                        root_fallback=True)
 
 
 def main():
@@ -108,12 +135,16 @@ def main():
     a.add_argument("dataset_root", type=Path)
     a.add_argument("descriptor_config", type=Path, help="reference_matching descriptor config yaml (its `name` is the backbone key)")
     a.add_argument("--device", default="cuda")
+    a.add_argument("--overwrite", action="store_true",
+                   help="re-encode and REPLACE an existing backbone's value files in place (e.g. re-baking "
+                        "CleanDiftFinetunedFpn with different keys 0/1/2 -> 1/2/3); default skips a dir that "
+                        "already carries the backbone")
     args = p.parse_args()
 
     if args.cmd == "relocate":
         for_each_render_dir(args.dataset_root, _relocate_render_dir)
     elif args.cmd == "add-backbone":
-        _add_backbone(args.dataset_root, args.descriptor_config, args.device)
+        _add_backbone(args.dataset_root, args.descriptor_config, args.device, args.overwrite)
 
 
 if __name__ == "__main__":

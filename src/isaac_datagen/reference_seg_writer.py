@@ -106,9 +106,11 @@ def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
     from reference_matching import descriptor as descriptor_module
     descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
     with torch.inference_mode():
+        # descriptor owns prep (public contract) + leaf packaging (to_leaf): single-scale -> (C, h, w),
+        # keyed FPN -> {scale: (C_k, h_k, w_k)}. No prep/shape knowledge in the writer.
         class_to_descriptors = {
-            cls: descriptor(tv_rgba.unsqueeze(0).to(descriptor_device)).squeeze(0).cpu()
-            for cls, tv_rgba in class_to_ref.items()   # (C, h, w) spatial
+            cls: descriptor.to_leaf(descriptor(descriptor.prep(tv_rgba).unsqueeze(0).to(descriptor_device)))
+            for cls, tv_rgba in class_to_ref.items()
         }
     del descriptor
     return class_to_cid, name_to_class, class_to_ref, class_to_descriptors, backbone
