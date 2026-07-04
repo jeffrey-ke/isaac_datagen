@@ -92,11 +92,11 @@ and reuses `_seat` — fixed height retained on purpose (documented).
 - `isaac_datagen/src/isaac_datagen/configs/jagged-expanded-refseg-v2.yaml` — new dataset config.
 - `isaac_datagen/src/isaac_datagen/{configs/expanded-refseg-v2.yaml, datasets/debug/render996/runtime.yaml}` — key rename.
 
-## Known follow-up (NOT done)
-The `column_height` → `max_column_height` rename was applied only to the two configs above. **Seven
-other configs still pass `column_height` under `placement: UntilExhaustedStacker` and will now
-raise** (`amazon`, `expanded-refseg`, `mixed`, `random3_smoke`, `shelf`, `staggered`,
-`tuna_only_smoke`). None use `ShelfPlacer`, so all seven should migrate to `max_column_height`.
+## Config rename — all migrated
+The `column_height` → `max_column_height` rename covers **every** `UntilExhaustedStacker` config
+(none use `ShelfPlacer`): `expanded-refseg-v2`, `jagged-expanded-refseg-v2`, plus the seven others
+migrated in the same pass — `amazon`, `expanded-refseg`, `mixed`, `random3_smoke`, `shelf`,
+`staggered`, `tuna_only_smoke`.
 
 ## Verification
 - `python3 -m py_compile placers.py` — OK.

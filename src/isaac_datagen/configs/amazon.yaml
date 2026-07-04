@@ -5,7 +5,7 @@ scene: empty
 intrinsics_path: zed_K.npy
 placement: UntilExhaustedStacker
 placement_args:
-  column_height: 3   # explicit — no hidden ctor default (was relying on RuntimeConfig's old default)
+  max_column_height: 3   # explicit — no hidden ctor default (was relying on RuntimeConfig's old default)
 descriptor_device: cuda:1
 proposer_device: cuda:0
 dome_light: True

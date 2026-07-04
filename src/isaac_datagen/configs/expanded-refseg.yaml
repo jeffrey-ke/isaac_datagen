@@ -28,7 +28,7 @@ dry_run: False
 # Placement / poses — render002's recipe (replaces the removed pallet OccupancyGrid placer).
 placement: UntilExhaustedStacker
 placement_args:
-  column_height: 3
+  max_column_height: 3
 pose_generation_policy: LookAtPoser
 pose_generation_policy_args:
   xrange: ${xrange}

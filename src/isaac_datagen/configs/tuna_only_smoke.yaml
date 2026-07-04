@@ -10,7 +10,7 @@ intrinsics_path: zed_K.npy
 
 placement: UntilExhaustedStacker
 placement_args:
-  column_height: 3
+  max_column_height: 3
 
 descriptor_device: cuda:1
 proposer_device: cuda:0

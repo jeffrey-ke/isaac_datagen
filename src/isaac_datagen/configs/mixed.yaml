@@ -6,7 +6,7 @@ intrinsics_path: zed_K.npy
 # Heterogeneous dataset: the until-exhausted column stacker (placers.py registry).
 placement: UntilExhaustedStacker
 placement_args:
-  column_height: 5
+  max_column_height: 5
 num_frames: 5
 descriptor_device: cuda:1
 proposer_device: cuda:0
