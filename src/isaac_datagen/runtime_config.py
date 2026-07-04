@@ -140,6 +140,21 @@ class RuntimeConfig:
     distant_light_offset: tuple[float, float, float] = (1.0, -3.0, 3.0)  # sun pos rel. to centroid; dir only
     dome_fill_intensity: float = 200.0
 
+    # ── Per-frame key-light jitter ───────────────────────────────────────────
+    # Re-lights the wall every captured frame so faces don't render uniformly.
+    # Direction jitters the "sun" position (eye = centroid + distant_light_offset)
+    # in the grasp-centroid frame: perturb the offset by U(-j, j) per axis and
+    # re-aim via look_at_euler, so the wall stays front-keyed and per-face shading
+    # + shadow direction change. All channels apply as direct USD writes from
+    # the capture step loop with fully precomputed seeded schedules (exact
+    # applied values land in lighting_log.json) — Replicator-graph modifies on
+    # build_scene lights never execute; see
+    # .docs_claude/lighting-jitter-mechanism.md. None/0 disables that channel.
+    jitter_distant: bool = False
+    distant_offset_jitter: float = 0.75         # per-axis half-width (m) of the sun-offset jitter; 0 → fixed dir
+    distant_intensity_jitter: tuple[float, float] | None = None    # per-frame uniform range; None → static
+    distant_temperature_jitter: tuple[float, float] | None = None  # per-frame Kelvin range; None → default white
+
     # ── Lighting diagnostics (dark-box investigation) ────────────────────────
     # SUPERSEDED: the live recipe is the distant-key + dome-fill block above, not
     # dome-only. These fields remain for the seeded dome-intensity diagnostic path
@@ -205,6 +220,15 @@ class RuntimeConfig:
         assert self.inlier_border_eps >= 0, f"inlier_border_eps must be ≥ 0: {self.inlier_border_eps}"
         lo, hi = self.dome_intensity_range
         assert lo <= hi, f"dome_intensity_range must have lo<=hi: {(lo, hi)}"
+        assert self.distant_offset_jitter >= 0.0, \
+            f"distant_offset_jitter must be >= 0: {self.distant_offset_jitter}"
+        if self.distant_intensity_jitter is not None:
+            lo, hi = self.distant_intensity_jitter
+            assert 0 <= lo <= hi, f"distant_intensity_jitter must have 0<=lo<=hi: {(lo, hi)}"
+        if self.distant_temperature_jitter is not None:
+            lo, hi = self.distant_temperature_jitter
+            assert 1000.0 <= lo <= hi <= 10000.0, \
+                f"distant_temperature_jitter must be 1000<=lo<=hi<=10000 K: {(lo, hi)}"
         assert self.exposure_time > 0, f"exposure_time must be > 0: {self.exposure_time}"
         assert self.f_number > 0, f"f_number must be > 0: {self.f_number}"
         assert self.film_iso > 0, f"film_iso must be > 0: {self.film_iso}"
