@@ -99,6 +99,7 @@ class ReplicatorWrapper:
     def __init__(self, rep):
         self.rep = rep
         self._randomizers = []
+        self._per_frame = []
 
     def register(self, fn):
         self.rep.randomizer.register(fn)
@@ -108,24 +109,78 @@ class ReplicatorWrapper:
         for fn in self._randomizers:
             fn()
 
+    def register_per_frame(self, fn):
+        """fn(i): direct USD writes applied by the capture step loop right
+        before frame i renders (capture_session per_frame hook)."""
+        self._per_frame.append(fn)
 
-def register_dome_jitter(rep, replicator, prim_path, runtime):
-    """Per-frame dome-intensity jitter, randomly sampled each frame.
+    def per_frame(self, i):
+        for fn in self._per_frame:
+            fn(i)
 
-    Stateless rep.distribution.uniform: it redraws on every orchestrator step,
-    seeded run-to-run by set_global_seed in make_replicator. (A Python-sampled
-    rep.distribution.sequence would let us log the exact per-frame values, but
-    sequence does not advance on an attribute write the way it does on
-    modify.pose — it sticks on the first value — so uniform is the path that
-    actually varies frame to frame.)
+
+def register_dome_jitter(replicator, prim_path, runtime, num_frames):
+    """Per-frame dome-fill intensity jitter via direct USD writes from the
+    capture step loop. The whole schedule is precomputed with a seeded rng
+    (stream decorrelated from the key light's) and returned for
+    lighting_log.json — schedule == applied. Graph jitter (rep.modify inside a
+    rep.randomizer.register'd fn) provably never executes on build_scene
+    lights; see .docs_claude/lighting-jitter-mechanism.md.
     """
-    node = rep.get.prim_at_path(prim_path)
+    from pxr import Usd, UsdLux
+    from isaacsim.core.utils.stage import get_current_stage
+    stage = get_current_stage()
+    light = UsdLux.DomeLight(stage.GetPrimAtPath(prim_path))
     lo, hi = runtime.dome_intensity_range
-    def jitter_dome():
-        with node:
-            rep.modify.attribute("intensity", rep.distribution.uniform(lo, hi))
-        return node.node
-    replicator.register(jitter_dome)
+    intensities = np.random.default_rng([runtime.effective_seed, 1]).uniform(lo, hi, num_frames).tolist()
+
+    def jitter_dome(i):
+        with Usd.EditContext(stage, stage.GetRootLayer()):
+            light.GetIntensityAttr().Set(intensities[i])
+    replicator.register_per_frame(jitter_dome)
+    return intensities
+
+
+def register_distant_jitter(replicator, prim_path, runtime, num_frames):
+    """Per-frame key-light jitter for the aimed DistantLight, via direct USD
+    writes from the capture step loop (the SDK's own existing-light idiom —
+    infinigen randomize_lights — after the graph route proved a no-op; see
+    .docs_claude/lighting-jitter-mechanism.md).
+
+    Direction: a per-frame jittered "sun" offset (distant_light_offset +
+    U(-j, j)³) re-aimed via look_at_euler. The centroid cancels out of the aim,
+    so no prim readback or centroid value is needed and the base direction
+    matches build_scene by construction. Intensity / color temperature:
+    per-frame uniform draws. The full schedule is precomputed with a seeded rng
+    and returned for lighting_log.json — schedule == applied. Returns
+    (base_euler, rotations, intensities | None, temperatures | None).
+    """
+    from pxr import Usd, UsdLux
+    from isaacsim.core.utils.stage import get_current_stage
+    stage = get_current_stage()
+    prim = stage.GetPrimAtPath(prim_path)
+    light = UsdLux.DistantLight(prim)
+    base = look_at_euler(runtime.distant_light_offset, (0.0, 0.0, 0.0))   # nominal aim (matches build_scene)
+    rng = np.random.default_rng([runtime.effective_seed, 0])              # reproducible; decorrelated from dome
+    rotations = sample_offset_eulers(runtime.distant_light_offset, runtime.distant_offset_jitter, num_frames, rng)
+    intensities = temperatures = None
+    if runtime.distant_intensity_jitter is not None:
+        lo, hi = runtime.distant_intensity_jitter
+        intensities = rng.uniform(lo, hi, num_frames).tolist()
+    if runtime.distant_temperature_jitter is not None:
+        lo, hi = runtime.distant_temperature_jitter
+        temperatures = rng.uniform(lo, hi, num_frames).tolist()
+        light.GetEnableColorTemperatureAttr().Set(True)
+
+    def jitter_distant(i):
+        set_transform(prim, rotation=rotations[i])   # root-layer rotateXYZ — the op build_scene aimed with
+        with Usd.EditContext(stage, stage.GetRootLayer()):
+            if intensities is not None:
+                light.GetIntensityAttr().Set(intensities[i])
+            if temperatures is not None:
+                light.GetColorTemperatureAttr().Set(temperatures[i])
+    replicator.register_per_frame(jitter_distant)
+    return base, rotations, intensities, temperatures
 
 
 def register_background_jitter(rep, replicator, prim_path, texture_paths):
@@ -148,13 +203,21 @@ def register_box_texture_jitter(rep, replicator, texture_paths, shader_paths):
 
 
 def make_replicator(runtime, num_frames, render_dir):
-    """Build the per-frame randomizer graph.
+    """Build the per-frame randomizers: lighting via step-loop USD writes,
+    textures via the Replicator graph.
 
-    Lighting is a STATIC aimed-DistantLight key + low DomeLight fill (see build_scene) —
-    no per-frame light jitter by default. `num_frames` is len(world_poses)
-    (= num_targets × num_frames) threaded from the call site for the lighting_log header.
-    The optional dome-intensity jitter (jitter_dome, off) and background jitter register
-    here when enabled, seeded run-to-run by runtime.effective_seed.
+    The DistantLight key + DomeLight fill are authored (aimed) in build_scene.
+    Per-frame lighting jitter registers here when enabled, seeded run-to-run by
+    runtime.effective_seed: the key light re-lights every frame (direction +
+    intensity + color-temperature) when jitter_distant is on, and the dome fill
+    intensity jitters when jitter_dome is on. Both default off → static
+    lighting. Lighting jitters as register_per_frame callbacks — direct USD
+    writes applied by capture_session right before each step — because graph
+    modifies on the build_scene lights never execute (see
+    .docs_claude/lighting-jitter-mechanism.md); the full schedules land in
+    lighting_log.json, so the log records what was APPLIED, not intent.
+    `num_frames` is len(world_poses) (= num_targets × num_frames) threaded from
+    the call site for the schedule lengths + the lighting_log header.
     """
     import omni.replicator.core as rep
     from omni.replicator.core.utils.rng import set_global_seed
@@ -162,13 +225,20 @@ def make_replicator(runtime, num_frames, render_dir):
 
     replicator = ReplicatorWrapper(rep)
     log = {}
-    # The DistantLight key + DomeLight fill are static (authored in build_scene); only the
-    # optional dome-intensity jitter registers here, and only when jitter_dome is on.
+    if runtime.distant_light and runtime.jitter_distant:
+        base, rotations, intensities, temperatures = register_distant_jitter(
+            replicator, "/World/DistantLight", runtime, num_frames)
+        log["DistantLight"] = {
+            "base_rotation_xyz_deg": list(base),
+            "offset_jitter_m": runtime.distant_offset_jitter,
+            "rotations_xyz_deg": [list(r) for r in rotations],   # exact applied per-frame schedule
+            "intensity": intensities if intensities is not None else runtime.distant_intensity,
+            "temperature": temperatures,
+        }
+    # The DomeLight fill is static unless jitter_dome is on. Logged as a bare
+    # per-frame list — the shape measure_luminance.load_lighting joins against.
     if runtime.dome_light and runtime.jitter_dome:
-        register_dome_jitter(rep, replicator, "/World/DomeLight", runtime)
-        log["DomeLight"] = {"distribution": "uniform",
-                            "intensity_range": list(runtime.dome_intensity_range),
-                            "normalize": runtime.dome_normalize}
+        log["DomeLight"] = register_dome_jitter(replicator, "/World/DomeLight", runtime, num_frames)
     if runtime.background_textures:
         register_background_jitter(rep, replicator, "/World/DomeLight", runtime.background_textures)
 
@@ -210,6 +280,18 @@ def look_at_euler(eye, target):
     from vision_core.pose_utils import look_at, cv2opengl
     pose = cv2opengl(look_at(np.asarray(target, float), np.asarray(eye, float)))
     return tuple(R.from_matrix(pose[:3, :3]).as_euler("xyz", degrees=True))
+
+
+def sample_offset_eulers(offset, jitter, n, rng):
+    """n euler-XYZ (deg) rotations = the key light aimed from a per-frame
+    jittered "sun" position (offset + U(-jitter, jitter) per axis) toward the
+    grasp centroid. Only direction matters for a DistantLight, so the centroid
+    cancels — reuse look_at_euler(eye=offset+δ, target=origin), the same
+    convention build_scene aims with. Only the component of δ transverse to the
+    ray tilts the direction; the offset length sets the angular spread."""
+    offset = np.asarray(offset, float)
+    deltas = rng.uniform(-jitter, jitter, size=(n, 3))
+    return [look_at_euler(eye=offset + d, target=(0.0, 0.0, 0.0)) for d in deltas]
 
 
 def make_distant_light(stage, parent, intensity=3000.0, angle=0.53, rotation=(0.0, 0.0, 0.0)):
@@ -383,7 +465,7 @@ def build_scene(runtime, objects: List[GraspableObject]):
     # Dome is a low ambient fill so shadowed faces don't crush to black; the DistantLight
     # key (created below, after the geometry exists, so it can be aimed) is the main source.
     make_dome_light(stage, "/World",
-                    intensity=500 if runtime.dome_light else 0.0,
+                    intensity=runtime.dome_fill_intensity if runtime.dome_light else 0.0,
                     normalize=runtime.dome_normalize)
 
     parent_path = "/World/GeneratedPallets"

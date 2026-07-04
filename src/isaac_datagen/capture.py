@@ -106,19 +106,27 @@ def attach_writers(pairs):
 
 
 @contextmanager
-def capture_session(writers, cameras, n_frames, replicator, rt_subframes=20):
+def capture_session(writers, cameras, n_frames, replicator, rt_subframes=20, per_frame=None):
     """Open a Replicator capture scope around caller-defined per-frame ops.
 
     Enters rep.new_layer(), attaches writers to camera render products under
     broadcast rules, yields rep so the caller can open whatever triggers and
     modifiers they want, then drives n_frames steps and waits for completion.
+
+    per_frame(i), if given, runs immediately before step i: direct USD writes
+    made there reach frame i's render. This is how lighting jitters — the
+    graph route (rep.modify inside a rep.randomizer.register'd fn) provably
+    never executes, while direct in-trigger modify nodes (move_prims) do; see
+    .docs_claude/lighting-jitter-mechanism.md.
     """
     rep = replicator.rep
     pairs = _broadcast_pairs(writers, cameras)
     with rep.new_layer():
         attach_writers(pairs)
         yield rep
-    for _ in range(n_frames):
+    for i in range(n_frames):
+        if per_frame is not None:
+            per_frame(i)
         rep.orchestrator.step(rt_subframes=rt_subframes)
     rep.orchestrator.wait_until_complete()
 
@@ -152,6 +160,7 @@ def capture_with_poses(world_poses, writer, camera, replicator, rt_subframes=20)
         n_frames=len(world_poses),
         replicator=replicator,
         rt_subframes=rt_subframes,
+        per_frame=replicator.per_frame,
     ) as rep:
         with rep.trigger.on_frame():
             move_prims([rig_node], [world_poses], replicator)
