@@ -102,7 +102,8 @@ class RuntimeConfig:
 
     # Object-placement policy registry (placers.py): name a placer class in
     # `placement`, pass its ctor kwargs here verbatim (mirrors pose_generation_policy
-    # / segmentation OptimConfig). e.g. {"column_height": 5} for UntilExhaustedStacker.
+    # / segmentation OptimConfig). e.g. {"max_column_height": 5, "epsilon": 0.002} for
+    # UntilExhaustedStacker (jagged column heights); ShelfPlacer takes a fixed "column_height".
     placement_args: dict = field(default_factory=dict)
     # Legacy OccupancyGrid grid dims (i,j,k); no longer used by the live placement path
     # (placers.py retired OccupancyGrid), still read by debug_scripts. Optional.

@@ -1,21 +1,21 @@
-# expanded-refseg-v2 — optflow re-render config (curated 8-class amazon subset + depth jitter).
+# jagged-expanded-refseg-v2 — expanded-refseg-v2 with jagged column heights + larger jitter.
 #
-# Like expanded-refseg.yaml but: (1) reads the pre-filtered 8-instance catalog
-# assets/optflow_objects/amazon-v2/ (blue/brown/burgundy/cyan/green/orange/pink/red — one box per
-# class), so NO RegexFilter is needed; (2) the UntilExhaustedStacker staggers columns across world-y
-# depth (min_y/max_y); (3) writes to datasets/expanded-refseg-v2. Drive each render dir per-dir:
-#   isaac-datagen configs/expanded-refseg-v2.yaml idx=0 num_frames=100 num_targets=10
-#   isaac-datagen configs/expanded-refseg-v2.yaml idx=1 num_frames=100 num_targets=10
-#   isaac-datagen configs/expanded-refseg-v2.yaml idx=2 num_frames=100 num_targets=10
-# (obs = num_frames * num_targets; dir count + sizes are free parameters — confirm before rendering.)
+# Delta over expanded-refseg-v2.yaml:
+#   - placement_args.max_column_height (jagged: per-column random height in [1, max]) replaces
+#     the old fixed column_height; placement_args.epsilon=0.01 (up from the 0.002 default) sets
+#     BOTH the inter-object vertical gap and the (x, y) placement jitter sigma.
+#   - ReplicateFilter count 5 -> 10 (denser clutter).
+#   - writes to datasets/jagged-expanded-refseg-v2; baked num_frames=20 / num_targets=5 (100 obs).
+# Drive per-dir (num_frames/num_targets overridable on the CLI):
+#   isaac-datagen-pipeline configs/jagged-expanded-refseg-v2.yaml idx=0
 
 mode: optflow                      # MANDATORY (no default); baked so no CLI flag is needed
 scene: empty
 seed: 1                            # effective_seed = seed + idx -> distinct RNG per dir
 idx: 0                             # overridden per dir
-num_targets: 10                    # overridden per dir
-num_frames: 100                    # overridden per dir
-dataset_dir: /data/user/jeffk/datasets/expanded-refseg-v2   # MUST pre-exist
+num_targets: 5                     # camera targets (grasp points aimed at)
+num_frames: 20                     # poses per target; obs = num_targets * num_frames = 100
+dataset_dir: /data/user/jeffk/datasets/jagged-expanded-refseg-v2   # MUST pre-exist
 intrinsics_path: zed_K.npy
 
 descriptor_device: cuda:1          # GPU — Phase 1 precomputes the DIFT reference features
@@ -25,11 +25,12 @@ proposer_device: cpu               # baked so the dir's runtime.yaml already mat
 dome_light: True
 dry_run: False
 
-# Placement / poses — UntilExhaustedStacker with y-depth jitter (min_y/max_y stagger columns
-# front-to-back instead of a flat wall at y=0).
+# Placement / poses — UntilExhaustedStacker, now jagged column heights with y-depth jitter
+# (min_y/max_y stagger columns front-to-back instead of a flat wall at y=0).
 placement: UntilExhaustedStacker
 placement_args:
-  max_column_height: 3
+  max_column_height: 3             # jagged: each column height drawn uniformly in [1, 3]
+  epsilon: 0.01                    # inter-object gap + (x,y) jitter sigma (up from 0.002 default)
   min_y: 0.0
   max_y: 0.10                      # 10cm front-to-back (world-y depth) stagger (USD meters)
   min_gap: 0.0
@@ -49,7 +50,7 @@ objects_path:
 obs_full_alpha: False
 filter_specs:
   - name: ReplicateFilter
-    args: {key: name, value: 'amazon_*', count: 5}
+    args: {key: name, value: 'amazon_*', count: 10}
   - name: ShuffleFilter
     args:
       seed: ${idx}
