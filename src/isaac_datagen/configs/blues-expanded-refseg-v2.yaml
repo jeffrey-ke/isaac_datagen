@@ -1,0 +1,90 @@
+# blues-expanded-refseg-v2 — jagged-expanded-refseg-v2 restricted to the blue-family classes.
+#
+# Delta over jagged-expanded-refseg-v2.yaml:
+#   - RegexFilter keeps only amazon_teal / amazon_aquamarine / amazon_blue / amazon_cyan
+#     (4 of the 10 amazon-v2 objects); everything else is identical.
+#   - writes to datasets/blues; seed=300 so a BENCHMARK dir never shares an effective
+#     seed (seed+idx) with the training dirs (jagged eff 1-6, jagged2 eff 100-106).
+# Drive per-dir (num_frames/num_targets overridable on the CLI):
+#   isaac-datagen-pipeline configs/blues-expanded-refseg-v2.yaml idx=0
+
+mode: optflow                      # MANDATORY (no default); baked so no CLI flag is needed
+scene: empty
+seed: 300                          # effective_seed = seed + idx -> distinct RNG per dir
+idx: 0                             # overridden per dir
+num_targets: 5                     # camera targets (grasp points aimed at)
+num_frames: 20                     # poses per target; obs = num_targets * num_frames = 100
+dataset_dir: /data/user/jeffk/datasets/blues   # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:1          # GPU — Phase 1 precomputes the DIFT reference features
+proposer_device: cpu               # baked so the dir's runtime.yaml already matches Stage B
+                                   # (grid proposer is reference-free, no NN -> CPU)
+
+dome_light: True
+dry_run: False
+
+# Placement / poses — UntilExhaustedStacker, now jagged column heights with y-depth jitter
+# (min_y/max_y stagger columns front-to-back instead of a flat wall at y=0).
+placement: UntilExhaustedStacker
+placement_args:
+  max_column_height: 3             # jagged: each column height drawn uniformly in [1, 3]
+  epsilon: 0.01                    # inter-object gap + (x,y) jitter sigma (up from 0.002 default)
+  min_y: 0.0
+  max_y: 0.10                      # 10cm front-to-back (world-y depth) stagger (USD meters)
+  min_gap: 0.0
+  max_gap: 0.50                    # up to 50cm horizontal (x) gap jitter between columns
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.25, 0.85]
+yrange: [-0.42, 0.42]
+zrange: [-0.40, 0.40]
+
+# Blue-family subset of the 10-instance amazon-v2 catalog (relative to src/isaac_datagen/).
+objects_path:
+  - ../../assets/optflow_objects/amazon-v2/
+obs_full_alpha: False
+filter_specs:
+  - name: RegexFilter
+    args: {key: class, value: 'amazon_teal|amazon_aquamarine|amazon_blue|amazon_cyan'}
+  - name: ReplicateFilter
+    args: {key: name, value: 'amazon_*', count: 10}
+  - name: ShuffleFilter
+    args:
+      seed: ${idx}
+
+# Lighting / exposure — render002 values.
+distant_light: True
+distant_intensity: 2000.0
+distant_angle: 0.53
+distant_light_offset: [1.0, -3.0, 3.0]
+dome_fill_intensity: 200.0
+
+# Per-frame key-light jitter (see runtime_config.py): sun-offset jitter around the
+# aimed front-top dir + intensity/temperature ranges centered on the static values.
+jitter_distant: True
+distant_offset_jitter: 2.0                     # per-axis half-width (m) of sun jitter; ~±30° at offset [1,-3,3]
+distant_intensity_jitter: [500.0, 4000.0]      # 8x ratio — ACES + fill floor eat a ~2x swing (see lighting-jitter-mechanism.md)
+distant_temperature_jitter: [4500.0, 8500.0]   # warm ↔ cool white
+# Dome-fill intensity jitter (ambient-level variety), retuned to fill scale:
+jitter_dome: True
+dome_intensity_range: [100.0, 350.0]           # centered ~ dome_fill_intensity 200
+
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32
+
+# Proposer / gate — bake the grid proposer + reproj-coverage gate into runtime.yaml so the baked
+# snapshot is honest for Stage B (Stage B re-overrides these on the CLI regardless).
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+proposer_min_visible_ratio: 0.30   # reproj-coverage gate threshold (fraction of ref texture visible)
+
+# Phase-3 inliers: border margin (px) a proposal must keep inside its class union mask.
+inlier_border_eps: 0.0             # amazon convention (render002 + mixed-persp amazon use 0.0)
