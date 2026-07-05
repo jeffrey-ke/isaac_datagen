@@ -17,6 +17,7 @@ os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
 
 from dataclasses import asdict
 from pathlib import Path
+import argparse
 import itertools
 import json
 import sys
@@ -29,6 +30,7 @@ from isaac_datagen.runtime_config import load_config
 from isaac_datagen.objects import GraspableObject, OptFlowObject
 from isaac_datagen.filters import filter_objects
 from isaac_datagen import posers
+from isaac_datagen.tldr import TLDR
 from vision_core.seed_utils import seed_everything
 
 
@@ -184,8 +186,20 @@ def optflow_generation(runtime=None):
 
 
 def main():
-    """Console entry: load the config, then dispatch on runtime.mode."""
-    runtime = load_config(sys.argv[1], sys.argv[2:])
+    """Console entry: parse config + dotlist overrides, then dispatch on runtime.mode."""
+    parser = argparse.ArgumentParser(
+        prog="isaac-datagen",
+        description="Load a YAML config (+ optional key=value dotlist overrides), "
+                     "boot Isaac Sim, and render a dataset.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=TLDR,
+    )
+    parser.add_argument("config", help="path to a YAML config (see CONFIGS below)")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    args, overrides = parser.parse_known_args(sys.argv[1:])
+    runtime = load_config(args.config, overrides)
     if runtime.mode == "optflow":
         optflow_generation(runtime)
     else:

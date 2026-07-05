@@ -26,12 +26,14 @@ for sharding, not subsetting.
 Usage: isaac-datagen-pipeline <config.yaml> [key=value ...]
 """
 
+import argparse
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from isaac_datagen.runtime_config import load_config
+from isaac_datagen.tldr import TLDR
 from isaac_datagen.validate_obsmask import validate_render_dir, _format_orphan
 
 
@@ -98,10 +100,19 @@ def _run_proposals_sharded(devices, n_obs: int, runtime) -> None:
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("usage: isaac-datagen-pipeline <config.yaml> [key=value ...]", file=sys.stderr)
-        sys.exit(1)
-    runtime = load_config(sys.argv[1], sys.argv[2:])
+    parser = argparse.ArgumentParser(
+        prog="isaac-datagen-pipeline",
+        description="Run all three phases (render -> proposals -> inlier labels) as one "
+                     "resumable command.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=TLDR,
+    )
+    parser.add_argument("config", help="path to a YAML config (see CONFIGS below)")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    args, overrides = parser.parse_known_args(sys.argv[1:])
+    runtime = load_config(args.config, overrides)
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
 
     obs = render_dir / "obs"
