@@ -192,6 +192,41 @@ def register_background_jitter(rep, replicator, prim_path, texture_paths):
     replicator.register(randomize_background)
 
 
+def register_light_pattern_jitter(replicator, spec, runtime, num_frames, stream):
+    """Per-frame intensity jitter for EXISTING lights matched by name pattern
+    (LightJitterSpec — store mode: the store's own lights). Light types unknown
+    up front → UsdLux.LightAPI, valid for any modern UsdLux light. Scale factors
+    against each light's authored base intensity, not absolute values —
+    preserves the scene's authored light balance. Same register_per_frame +
+    precomputed seeded-schedule idiom as register_dome_jitter; returns the
+    schedule for lighting_log.json — schedule == applied. rng stream
+    [seed, 2, k] decorrelates from the distant ([seed, 0]) and dome ([seed, 1])
+    streams."""
+    from pxr import Usd, UsdLux
+    from isaacsim.core.utils.stage import get_current_stage
+    stage = get_current_stage()
+    lights = {}
+    for p in find_prims(spec.root, spec.pattern):            # raises if nothing matches
+        attr = UsdLux.LightAPI(stage.GetPrimAtPath(p)).GetIntensityAttr()
+        if attr and attr.IsValid():
+            lights[p] = (attr, float(attr.Get()))
+    assert lights, f"light_jitter_patterns matched no UsdLux lights: {spec}"
+    # Log-uniform: light is perceptually multiplicative, so sample the factor
+    # uniformly in stops — a doubling is equally likely anywhere in range. A raw
+    # uniform draw over a wide ratio range (e.g. [0.25, 8]) puts half the frames
+    # above the geometric midpoint's square (mostly washed-out bright looks).
+    lo, hi = spec.intensity_scale_range
+    factors = np.exp(np.random.default_rng(
+        [runtime.effective_seed, 2, stream]).uniform(np.log(lo), np.log(hi), num_frames)).tolist()
+
+    def jitter_lights(i):
+        with Usd.EditContext(stage, stage.GetRootLayer()):   # override over the reference arc
+            for attr, base in lights.values():
+                attr.Set(base * factors[i])
+    replicator.register_per_frame(jitter_lights)
+    return {"base_intensity": {p: b for p, (_, b) in lights.items()}, "scale_factors": factors}
+
+
 def register_box_texture_jitter(rep, replicator, texture_paths, shader_paths):
     shader_nodes = [rep.get.prim_at_path(p) for p in shader_paths]
     def randomize_box_textures():
@@ -241,6 +276,9 @@ def make_replicator(runtime, num_frames, render_dir):
         log["DomeLight"] = register_dome_jitter(replicator, "/World/DomeLight", runtime, num_frames)
     if runtime.background_textures:
         register_background_jitter(rep, replicator, "/World/DomeLight", runtime.background_textures)
+    for k, spec in enumerate(runtime.light_jitter_patterns):
+        log[f"LightPattern{k}:{spec.pattern}"] = register_light_pattern_jitter(
+            replicator, spec, runtime, num_frames, stream=k)
 
     if runtime.log_lighting:
         import json

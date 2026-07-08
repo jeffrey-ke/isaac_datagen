@@ -60,11 +60,15 @@ class OptFlowObject(SerializableSample):
     """A GraspableObject re-cast as a dense-optical-flow reference.
 
     The canonical RGB-D view of the object rendered from a grasp-anchored virtual camera,
-    plus that camera's intrinsics and pose. ``grasp_point`` is dropped: its sole job —
-    defining the reference viewpoint — is now baked into ``ref_pose``. Produced offline by
-    ``optflow_render.py``; consumed by the capture writer (Plan 2) and the trainer adapter
-    (Plan 3), which compose ``ref_pose`` into the ref->obs warp, so it is stored in OpenCV
-    (+Z-forward) convention — NOT the OpenGL pose authored onto the Isaac camera prim.
+    plus that camera's intrinsics and pose. ``grasp_point`` is carried through from the
+    GraspableObject: ``ref_pose`` bakes the reference viewpoint for the ref->obs warp,
+    while ``grasp_point`` stays the object-local grasp/aim frame — store-mode capture
+    (store_scene.add_catalog_grasp_frame) authors it as the GraspPoint camera-aim anchor,
+    and it keeps the reference face inspectable on disk. Produced offline by
+    ``graspableobj_to_optflow_obj.py``; consumed by the capture writer (Plan 2) and the
+    trainer adapter (Plan 3), which compose ``ref_pose`` into the ref->obs warp, so it is
+    stored in OpenCV (+Z-forward) convention — NOT the OpenGL pose authored onto the Isaac
+    camera prim.
     """
     usd_path: UsdPath                # path to a .usdz file; copied into dataset on serialize
     meta: dict                       # must contain keys "name" and "class"
@@ -72,6 +76,7 @@ class OptFlowObject(SerializableSample):
     reference_depth: np.ndarray      # (H, W) float32 metric z-depth; 0 OUTSIDE the object
     ref_intrinsics: np.ndarray       # (3, 3) reference-camera K
     ref_pose: np.ndarray             # (4, 4) camera2local SE3, OpenCV (+Z-forward) convention
+    grasp_point: np.ndarray          # (4, 4) SE3, usdz-local frame; +X = reference face normal
 
     # Same field types as GraspableObject (UsdPath/PIL/dict + base np.ndarray) → reuse its table.
     _serializers = GraspableObject._serializers

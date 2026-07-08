@@ -25,6 +25,7 @@ import sys
 import yaml
 
 from isaac_datagen.scene import boot_sim, build_scene, make_replicator, warmup_render
+from isaac_datagen import scene_builders
 from isaac_datagen.capture import get_target2world, capture_with_poses, plan_capture
 from isaac_datagen.runtime_config import load_config
 from isaac_datagen.objects import GraspableObject, OptFlowObject
@@ -151,7 +152,8 @@ def optflow_generation(runtime=None):
         collect_preoptflow(runtime.objects_path),
         runtime.filter_specs,
     )
-    scene = build_scene(runtime, objects)          # SceneHandle.object_prim_paths now populated
+    scene = scene_builders.get(runtime.scene_builder)(runtime, objects)  # build_scene (default) |
+    #                                                build_store_scene — same signature/return
     l2w = get_target2world(scene.object_prim_paths)   # (M, 4, 4) aligned to scene.objects
 
     _idx, _grasp_points, world_poses = plan_capture(runtime, scene)

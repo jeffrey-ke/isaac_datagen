@@ -21,6 +21,16 @@ from isaac_datagen.filters import FilterSpec
 
 
 @dataclass
+class LightJitterSpec:
+    """Per-frame intensity jitter of EXISTING scene lights matched by prim-name
+    pattern under `root` (store mode: the store's own lights). Scale factors, not
+    absolute intensities — preserves the scene's authored light balance."""
+    root: str
+    pattern: str
+    intensity_scale_range: tuple[float, float]
+
+
+@dataclass
 class RuntimeConfig:
     idx: int
     mode: str
@@ -212,7 +222,22 @@ class RuntimeConfig:
     # and is required for both modes.
     objects_path: list[str] = field(default_factory=list)
 
+    # ── Scene-builder registry (scene_builders.py) ───────────────────────────
+    # Named builder(runtime, objects) -> SceneHandle. Default names the composed
+    # incumbent (same precedent as pose_generation_policy = "GridFixedPoser");
+    # store mode: scene_builder: build_store_scene + scene_builder_args validated
+    # fail-loud by store_scene.StoreSceneSpec (store_usd exists, patterns
+    # non-empty, grasp_frame_policy resolves — no default guessing).
+    scene_builder: str = "build_scene"
+    scene_builder_args: dict = field(default_factory=dict)
+    # Existing-light jitter registrations, applied in make_replicator.
+    light_jitter_patterns: list[LightJitterSpec] = field(default_factory=list)
+
     def __post_init__(self):
+        assert self.scene_builder, "scene_builder must name a scene_builders registry entry"
+        for s in self.light_jitter_patterns:
+            lo, hi = s.intensity_scale_range
+            assert s.root and s.pattern and 0 < lo <= hi, f"bad LightJitterSpec: {s}"
         assert (self.num_frames is None) ^ (self.grid_dims is None), \
             "exactly one of num_frames / grid_dims must be set"
         assert self.start_frame >= 0 and (self.end_frame is None or self.end_frame > self.start_frame), \

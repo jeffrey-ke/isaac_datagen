@@ -116,6 +116,7 @@ def main() -> None:
             reference_depth=depth,
             ref_intrinsics=K,
             ref_pose=ref_pose_cv.astype(np.float32),
+            grasp_point=obj.grasp_point.astype(np.float32),
         ).serialize(idx, out_dir)
         print(f"  [{idx:04d}] {obj.meta['name']} rendered", flush=True)
     app.close()

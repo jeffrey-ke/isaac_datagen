@@ -37,6 +37,7 @@ def main():
         usd_path=UsdPath(str(obj.usd_path)), meta=obj.meta,
         reference_image=PILImage.fromarray(rgb), reference_depth=depth,
         ref_intrinsics=K, ref_pose=ref_pose_cv.astype(np.float32),
+        grasp_point=obj.grasp_point.astype(np.float32),
     )
     PILImage.fromarray(o.visualize(title=f"{obj.meta['name']} (centroid-aligned)")).save(out_png)
     print(f"wrote {out_png}", flush=True)

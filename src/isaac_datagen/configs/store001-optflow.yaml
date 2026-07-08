@@ -1,0 +1,67 @@
+# store001 inverse-datagen. ONE yaml drives all three stages (paths relative to
+# the src/isaac_datagen run cwd, like every config here):
+#   Stage A  uv run extract_store_objects.py configs/store001-optflow.yaml datasets/store001-objects
+#   Stage B  uv run graspableobj_to_optflow_obj.py configs/store001-optflow.yaml \
+#              datasets/store001-objects datasets/store001-optflow-objects
+#   Stage C  isaac-datagen configs/store001-optflow.yaml idx=0 num_targets=... num_frames=...
+mode: optflow
+scene: empty                    # consumed only by build_scene; build_store_scene ignores it
+seed: 1
+idx: 0
+num_targets: 4
+num_frames: 25
+dataset_dir: datasets/store001-optflow          # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:0
+proposer_device: cpu
+dry_run: False
+inlier_border_eps: 0.0
+
+# ── Store scene (Stage A + Stage C single source of truth) ──────────────────
+scene_builder: build_store_scene                # scene_builders registry key (explicit selector)
+scene_builder_args:
+  store_usd: ../../../usds/store001.usd
+  product_patterns: ["model_snack*", "model_instant_beverages*", "model_flour*",
+                     "model_detergent*", "model_sauces*", "model_cereal*"]
+  grasp_frame_policy: FixedFaceGrasp            # grasp_policies registry key — REQUIRED
+  grasp_frame_policy_args: {face: "-Y"}         # verify the aisle-facing local face in the GUI (M0)
+
+# ── Lighting: the store's own lights, jittered by pattern ────────────────────
+dome_light: False                               # no synthetic dome/key over the store lighting
+distant_light: False
+# The 19 store lights live at /World/Store/model_store001/v_0/light (RectLight x7,
+# DiskLight x12); "*Light*" matches their type-suffixed prim names, NOT the E_light*
+# fixture-geometry Xforms (case-sensitive fnmatch; non-lights are skipped anyway).
+# Factors are drawn LOG-uniformly (perceptually even in stops); [0.25, 8] spans the
+# visually-verified envelope: 0.25x dim-but-legible floor .. 8x soft-bleached extreme.
+light_jitter_patterns:
+  - {root: "/World/Store", pattern: "*Light*", intensity_scale_range: [0.25, 8.0]}
+
+# ── Poses: grasp-frame +X = outward face normal → camera halo out in the aisle ─
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.3, 0.9]
+yrange: [-0.3, 0.3]
+zrange: [-0.2, 0.3]
+
+# ── Catalog (Stage-B output) + per-run SKU subset (no re-extraction needed) ──
+objects_path:
+  - datasets/store001-optflow-objects
+filter_specs:
+  - name: RegexFilter
+    args: {key: class, value: 'cereal.*'}       # smoke subset; drop for full 414-SKU runs
+
+placement: UntilExhaustedStacker                # required by RuntimeConfig; unused in store mode
+placement_args: {}
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32

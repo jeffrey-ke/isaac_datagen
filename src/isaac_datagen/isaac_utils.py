@@ -281,13 +281,58 @@ def local_bbox_range(prim):
     return bbox.ComputeLocalBound(prim).GetRange()
 
 
+def untransformed_bbox_range(prim):
+    """Aligned bbox range EXCLUDING the prim's own xformOps (ComputeUntransformedBound)
+    — the usdz-frame bbox of a subtree exported with neutralize_root_xform=True.
+    Same double-count rationale documented on scene.add_grasp_frame."""
+    from pxr import Usd, UsdGeom
+    bbox = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+    return bbox.ComputeUntransformedBound(prim).ComputeAlignedRange()
+
+
 def bottom_face_center(prim):
     bbox_range = local_bbox_range(prim)
     center = bbox_range.GetMidpoint()
     return (center[0], bbox_range.GetMin()[1], bbox_range.GetMin()[2])
 
 
-def export_subtree_usdz(stage, subtree_path, output_dir, base_name="scene"):
+def _localize_remote_assets(layer_path):
+    """Download a flattened layer's http(s) asset dependencies next to it and
+    rewrite the layer's asset paths to the local copies.
+
+    ``UsdUtils.CreateNewUsdzPackage`` can only map LOCAL files into the package;
+    a stage composed from a remote subLayer (store001's synthesis-multiverse
+    https layer) leaves texture paths as URLs in the flattened export. Downloads
+    go through ``omni.client`` (the same resolver that composed the stage), so
+    this only works inside a booted kit — which is where export_subtree_usdz
+    runs anyway. No-op when the layer has no remote asset paths.
+    """
+    import os
+    from pxr import Sdf, UsdUtils
+
+    layer = Sdf.Layer.FindOrOpen(layer_path)
+    dep_dir = os.path.dirname(layer_path)
+    downloaded = {}
+
+    def localize(asset_path):
+        if not asset_path.startswith(("http://", "https://")):
+            return asset_path
+        if asset_path not in downloaded:
+            import omni.client
+            name = f"{len(downloaded):03d}_{os.path.basename(asset_path).split('?')[0]}"
+            result = omni.client.copy(asset_path, os.path.join(dep_dir, name))
+            if result != omni.client.Result.OK:
+                raise RuntimeError(f"remote asset download failed ({result}): {asset_path}")
+            downloaded[asset_path] = f"./{name}"
+        return downloaded[asset_path]
+
+    UsdUtils.ModifyAssetPaths(layer, localize)
+    if downloaded:
+        layer.Save()
+
+
+def export_subtree_usdz(stage, subtree_path, output_dir, base_name="scene",
+                        root_prim=None, neutralize_root_xform=False):
     """Export one prim subtree of a live Isaac Sim stage to a standalone .usdz.
 
     The exported package inlines all geometry, materials, and textures of every
@@ -318,6 +363,15 @@ def export_subtree_usdz(stage, subtree_path, output_dir, base_name="scene"):
         subtree_path: Prim path of the subtree to isolate, e.g. "/World".
         output_dir: Directory to write the .usdz into.
         base_name: Stem for the output file.
+        root_prim: Exported root prim path (e.g. "/World" so the package satisfies
+            the ``load_asset(..., ref_prim_path="/World")`` contract every catalog
+            loader assumes). None → "/<subtree prim name>" (legacy behavior).
+        neutralize_root_xform: Author an EMPTY xformOpOrder on the export root (a
+            local opinion, stronger than the reference arc) so the flattened
+            package holds the subtree in the source prim's OWN local frame —
+            required for a catalog ``ref_pose`` (usdz-local) and a capture-time
+            ``get_target2world(P)`` to compose without double-counting P's
+            placement/scale.
 
     Returns:
         str: Absolute path to the created .usdz.
@@ -334,11 +388,14 @@ def export_subtree_usdz(stage, subtree_path, output_dir, base_name="scene"):
     solo = Usd.Stage.CreateInMemory()
 
     # 2. One root prim that *references* the subtree of the live root layer.
-    export_prim = solo.DefinePrim(f"/{src_prim.GetName()}")
+    export_prim = solo.DefinePrim(root_prim or f"/{src_prim.GetName()}")
     export_prim.GetReferences().AddReference(
         assetPath=stage.GetRootLayer().identifier,
         primPath=subtree_path,
     )
+    if neutralize_root_xform:
+        from pxr import UsdGeom, Vt
+        UsdGeom.Xformable(export_prim).CreateXformOpOrderAttr().Set(Vt.TokenArray())
 
     # 3. A standalone layer MUST name a defaultPrim or it exports invalid/tiny.
     solo.SetDefaultPrim(export_prim)
@@ -351,6 +408,10 @@ def export_subtree_usdz(stage, subtree_path, output_dir, base_name="scene"):
         temp_usd = os.path.join(temp_dir, f"{base_name}.usdc")
         if not solo.Export(temp_usd):
             raise RuntimeError(f"solo.Export({temp_usd}) returned False")
+        # 4b. Localize http(s) asset dependencies: scenes composed from a remote
+        # subLayer (store001) reference textures by URL, which the zip writer
+        # cannot map ("Failed to map 'https://...': No such file or directory").
+        _localize_remote_assets(temp_usd)
         # 5. Package the layer + discovered asset dependencies into .usdz.
         if not UsdUtils.CreateNewUsdzPackage(temp_usd, usdz_path):
             raise RuntimeError("UsdUtils.CreateNewUsdzPackage returned False")
