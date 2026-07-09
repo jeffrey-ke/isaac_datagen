@@ -164,13 +164,15 @@ def optflow_generation(runtime=None):
         app.close()
         return
 
-    # obsmask.obs is RGBA whose alpha carries the instance foreground (full_alpha=False, recoverable
+    # obsmask.obs is RGBA whose alpha carries the instance foreground by default (recoverable
     # straight off obs). The RGB channels are the full frame either way (composite_rgba never masks RGB;
     # straight-alpha PNG preserves color under alpha==0), and the UFM adapter reads obs[:3], so the alpha
-    # never reaches the warp — no reason to blank it to 255.
+    # never reaches the warp — training runs have no reason to blank it to 255. runtime.obs_full_alpha
+    # (default False) is the same inspection toggle reference_segmentation() honors, for viewing the
+    # whole frame (shelf/occluders) opaque in a normal image viewer.
     writer = OptFlowWriter(scene.objects, l2w, scene.zed.intrinsics, render_dir,
                            runtime.descriptor_config_path, runtime.descriptor_device,
-                           full_alpha=False)   # obs K = zed.intrinsics
+                           full_alpha=runtime.obs_full_alpha)   # obs K = zed.intrinsics
     replicator = make_replicator(runtime, len(world_poses), render_dir)
     warmup_render(app, runtime.warmup_frames)      # settle RTX before the writer captures
     capture_with_poses(world_poses, writer, scene.zed, replicator, rt_subframes=runtime.rt_subframes)
