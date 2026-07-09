@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from isaac_datagen import grasp_policies
+from isaac_datagen import grasp_policies, store_mutations
 from isaac_datagen.hardwares import ZedMini
 from isaac_datagen.isaac_utils import create_empty, load_asset
 from isaac_datagen.scene import SceneHandle, make_dome_light
@@ -29,12 +29,21 @@ class StoreSceneSpec:
     product_patterns: list         # fnmatch prim-NAME globs for find_prims (Stage A)
     grasp_frame_policy: str        # grasp_policies registry key — required, no default
     grasp_frame_policy_args: dict = field(default_factory=dict)
+    # store_mutations registry specs [{name, args?}], applied in order by
+    # build_store_scene only — Stage A ignores them. Default [] = unmutated store.
+    # Names validated here; ctor args validated by make_mutations at build time
+    # (Stage A never needs the swap catalogs).
+    mutations: list = field(default_factory=list)
 
     def __post_init__(self):
         assert Path(self.store_usd).exists(), f"store_usd missing: {self.store_usd}"
         assert self.product_patterns and all(self.product_patterns), \
             f"product_patterns must be a non-empty list of non-empty globs: {self.product_patterns}"
         grasp_policies.get(self.grasp_frame_policy)    # KeyError at load, not mid-run
+        for m in self.mutations:
+            assert isinstance(m, dict) and m.get("name") and set(m) <= {"name", "args"}, \
+                f"mutation spec must be {{name, args?}}: {m!r}"
+            store_mutations.get(m["name"])             # KeyError at load, not mid-run
 
 
 def load_store(spec: StoreSceneSpec):
@@ -125,14 +134,31 @@ def build_store_scene(runtime, objects) -> SceneHandle:
     if runtime.dome_light:                                  # optional ambient fill over store lights
         make_dome_light(store.GetStage(), "/World", intensity=runtime.dome_fill_intensity,
                         normalize=runtime.dome_normalize)
+    # Bind each filtered catalog object to its own (already present) store prim;
+    # mutations rewrite the stage AND this list together, so the
+    # scene.objects[i] <-> object_prim_paths[i] writer contract can't drift.
+    targets = [store_mutations.CaptureTarget(o, resolve_product_prim(store, o).GetPath().pathString)
+               for o in objects]                            # the FILTERED subset only
+    rng = np.random.default_rng([runtime.effective_seed, 3])  # streams 0/1/2 = jitters
+    for mutation in store_mutations.make_mutations(spec.mutations):
+        targets = mutation(store, spec, targets, rng)
+    assert targets, "store mutations left no captureable targets"
+    names = [t.obj.meta["name"] for t in targets]           # mutations mint names
+    assert len(names) == len(set(names)), f"duplicate names after mutations: {names}"
+
+    stage = store.GetStage()
     object_prim_paths, grasp_frames = [], []
-    for o in objects:                                       # the FILTERED subset only
-        prim = resolve_product_prim(store, o)
-        p = prim.GetPath().pathString
-        label_product(prim, o)
-        grasp_frames.append(add_catalog_grasp_frame(p, o))
-        object_prim_paths.append(p)                         # l2w read at EXACTLY the exported node
+    for t in targets:                                       # uniform: store prims AND wrappers
+        prim = stage.GetPrimAtPath(t.prim_path)
+        assert prim.IsValid() and prim.IsActive(), f"target prim gone: {t.prim_path}"
+        assert " " not in t.obj.meta["class"], \
+            f"multi-token class (Isaac truncates at whitespace): {t.obj.meta['class']!r}"
+        label_product(prim, t.obj)       # override->remove->add: needed for swapped-in
+        #  store usdz with baked vendor labels (arm A); no-op-safe on clean usdz
+        grasp_frames.append(add_catalog_grasp_frame(t.prim_path, t.obj))
+        object_prim_paths.append(t.prim_path)               # l2w at EXACTLY the usdz-frame node
     zed = ZedMini("gripper", "/World", np.load(runtime.intrinsics_path),
                   width=runtime.width, height=runtime.height)
-    return SceneHandle(zed=zed, grasp_points=grasp_frames, objects=objects,
+    return SceneHandle(zed=zed, grasp_points=grasp_frames,
+                       objects=[t.obj for t in targets],    # mutated list, NOT the input
                        object_prim_paths=object_prim_paths)

@@ -296,6 +296,18 @@ def bottom_face_center(prim):
     return (center[0], bbox_range.GetMin()[1], bbox_range.GetMin()[2])
 
 
+def deactivate_prim(prim):
+    """Prune a prim's subtree from composition: root-layer SetActive(False).
+    Deactivation is the ONLY edit that removes a reference-composed subtree
+    (RemovePrim/RemoveProperty can't delete referenced opinions); hideForCamera
+    is no substitute (unreliable under PathTracing, still casts shadows).
+    Root layer for the same reason as set_transform (rep.new_layer targets)."""
+    from pxr import Usd
+    stage = prim.GetStage()
+    with Usd.EditContext(stage, stage.GetRootLayer()):
+        prim.SetActive(False)
+
+
 def _localize_remote_assets(layer_path):
     """Download a flattened layer's http(s) asset dependencies next to it and
     rewrite the layer's asset paths to the local copies.

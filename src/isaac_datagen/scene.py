@@ -29,25 +29,28 @@ RESOURCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resour
 
 
 def add_object(*, at_parent: str, obj: GraspableObject) -> str:
-    # Wrap the reference: Isaac Sim's transform path ignores xformOps authored
-    # directly on a reference-carrying prim. The placement transform must land
-    # on the plain Xform wrapper; the reference lives on a child that inherits
-    # it. The source .usdz files have no defaultPrim, so reference "/World".
-    from pxr import Usd, Tf
     from isaacsim.core.utils.stage import get_current_stage
     from isaacsim.core.utils.semantics import add_labels
-    # USD prim names must be valid identifiers; YCB names like "007_tuna_fish_can"
-    # lead with a digit (illegal -> SdfPath parses to <> and DefinePrim throws).
-    # Sanitize the path component only; the true name still rides on the instance
-    # semantic label below, which is what the iid->name->class chain reads.
-    wrapper_path = f"{at_parent}/{Tf.MakeValidIdentifier(obj.meta['name'])}"
-    geo_path = f"{wrapper_path}/geo"
+    wrapper_path = add_wrapped_reference(                       # same wrapper/geo mechanics
+        at_parent=at_parent, name=obj.meta["name"], usd_path=obj.usd_path)
+    geo = get_current_stage().GetPrimAtPath(f"{wrapper_path}/geo")
+    add_labels(geo, labels=[obj.meta["class"]], instance_name="class")
+    add_labels(geo, labels=[obj.meta["name"]], instance_name="instance")
+    return wrapper_path
+
+
+def add_wrapped_reference(*, at_parent: str, name: str, usd_path: str) -> str:
+    # Wrapper Xform + /geo reference child (Isaac ignores xformOps on a
+    # reference-carrying prim; catalog usdz have no defaultPrim -> "/World").
+    # NO labels: add_object labels geo plainly; store swaps label via
+    # label_product's override->remove->add ordering instead.
+    from pxr import Usd, Tf
+    from isaacsim.core.utils.stage import get_current_stage
+    wrapper_path = f"{at_parent}/{Tf.MakeValidIdentifier(name)}"   # YCB names lead with digits
     stage = get_current_stage()
     with Usd.EditContext(stage, stage.GetRootLayer()):
         stage.DefinePrim(wrapper_path, "Xform")
-    geo = load_asset(geo_path, obj.usd_path, ref_prim_path="/World")
-    add_labels(geo, labels=[obj.meta["class"]], instance_name="class")
-    add_labels(geo, labels=[obj.meta["name"]], instance_name="instance")
+    load_asset(f"{wrapper_path}/geo", usd_path, ref_prim_path="/World")
     return wrapper_path
 
 def organize_objects(policy: Callable, prim_paths: List[str]):
