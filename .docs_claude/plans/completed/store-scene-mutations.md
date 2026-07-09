@@ -115,6 +115,21 @@ uv run --extra viz python debug_scripts/viz_optflow.py datasets/store001-optflow
 uv run --with usd-core python debug_scripts/pull_flatten_usd.py datasets/store001-optflow-objects
 ```
 
+### Session artifacts (local, datasets/ is gitignored)
+
+Capture logs + the arm-A/B scratch config are preserved at
+`datasets/store001-mutation-verification/` (abs:
+`/home/jeffk/repo/refseg-workspace/isaac_datagen/src/isaac_datagen/datasets/store001-mutation-verification/`):
+`mut0.log` regression · `mut1.log` remove · `mut2.log` ycb replace · `mut2b.log`
+determinism re-run · `mut3.log` arm A (unscrubbed store swaps, clean) · `mut4.log` arm B
+(scrubbed, the 32-orphan failure) · `store001-optflow-replace-armA.yaml` — the exact
+config for the arm-A/B runs (`pattern: cereal002, catalog: datasets/store001-optflow-objects,
+source_class: cereal001`; run with idx=2 → render002 arm A, idx=3 → render003 arm B).
+Evidence renders: `datasets/store001-optflow-remove/render000` (remove),
+`datasets/store001-optflow-replace/render000` (ycb replace + `viz/viz_0000.png` montage),
+`render002` (arm A), `render003` (arm B repro). The no-mutation regression render
+(`store001-optflow/render009`) was deleted after passing to keep that training dir clean.
+
 ## Discoveries & learnings
 
 - **`label_product` on a fresh swap wrapper fully handles baked vendor semantics** (arm
