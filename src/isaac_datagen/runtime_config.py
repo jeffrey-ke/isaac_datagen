@@ -34,7 +34,7 @@ class LightJitterSpec:
 class RuntimeConfig:
     idx: int
     mode: str
-    num_targets: int
+    num_targets: int | None  # int => sample N grasp targets; null => every scene grasp frame ONCE (still required in yaml)
     scene: str
     dataset_dir: str
     intrinsics_path: str

@@ -68,7 +68,7 @@ def extract_one(store, model_path: str, policy, tmp_dir: str) -> GraspableObject
               "store_prim": p[len(str(store.GetPath())) + 1:]},  # (referencing /root splices its
         #  children directly under STORE_ROOT, so this is e.g. "model_sauces001_6/v_0")
         reference_image=placeholder_reference(),
-        grasp_point=policy(lo, hi).astype(np.float32),
+        grasp_point=policy(lo, hi, cls).astype(np.float32),
     )
 
 

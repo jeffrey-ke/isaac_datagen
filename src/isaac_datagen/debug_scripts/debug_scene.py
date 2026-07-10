@@ -55,7 +55,7 @@ def main():
     scene = build_scene(runtime, objects)
 
     n = len(scene.grasp_points)
-    idx = np.random.choice(n, size=runtime.num_targets)
+    idx = np.arange(n) if runtime.num_targets is None else np.random.choice(n, size=runtime.num_targets)
     selected = [scene.grasp_points[i] for i in idx]
 
     all_t2w = get_target2world(scene.grasp_points)        # (n, 4, 4)

@@ -1,0 +1,132 @@
+# store001 KEEP subset (42 curated SKU classes, per-class front faces). Drives Stages A+B
+# (paths relative to the src/isaac_datagen run cwd). Stage C (verification render) uses the
+# sibling configs/store001-optflow-verify.yaml, which reads this config's Stage-B catalog.
+#   Stage A  uv run extract_store_objects.py configs/store001-optflow-keep.yaml datasets/store001-objects-keep
+#   Stage B  uv run graspableobj_to_optflow_obj.py configs/store001-optflow-keep.yaml \
+#              datasets/store001-objects-keep datasets/store001-optflow-objects-keep
+mode: optflow
+scene: empty                    # consumed only by build_scene; build_store_scene ignores it
+seed: 1
+idx: 0
+num_targets: 4
+num_frames: 25
+dataset_dir: datasets/store001-optflow-keep    # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:0
+proposer_device: cpu
+dry_run: False
+inlier_border_eps: 0.0
+
+# ── Store scene (Stage A + Stage C single source of truth) ──────────────────
+scene_builder: build_store_scene                # scene_builders registry key (explicit selector)
+scene_builder_args:
+  store_usd: ../../../usds/store001.usd
+  product_patterns:                                   # the 42 KEEP globs (fully-kept cats collapse)
+    - "model_snack012*"
+    - "model_snack017*"
+    - "model_snack020*"
+    - "model_snack023*"
+    - "model_snack025*"
+    - "model_snack027*"
+    - "model_snack031*"
+    - "model_snack032*"
+    - "model_snack033*"
+    - "model_snack034*"
+    - "model_snack035*"
+    - "model_snack036*"
+    - "model_sauces001*"
+    - "model_instant_beverages001*"
+    - "model_instant_beverages002*"
+    - "model_instant_beverages003*"
+    - "model_instant_beverages004*"
+    - "model_instant_beverages005*"
+    - "model_instant_beverages007*"
+    - "model_instant_beverages009*"
+    - "model_instant_beverages010*"
+    - "model_instant_beverages011*"
+    - "model_flour*"
+    - "model_detergent*"
+    - "model_cereal*"
+  grasp_frame_policy: PerClassFaceGrasp          # NEW registry entry (Change 1)
+  grasp_frame_policy_args:
+    faces:                                            # 42 entries — the hand-curated keep-map
+      snack012: "+Y"
+      snack017: "-Y"
+      snack020: "-Y"
+      snack023: "-Y"
+      snack025: "-Y"
+      snack027: "-Y"
+      snack031: "-Y"
+      snack032: "+Y"
+      snack033: "-Y"
+      snack034: "-Y"
+      snack035: "-Y"
+      snack036: "-Y"
+      sauces001: "+Y"
+      instant_beverages001: "-Y"
+      instant_beverages002: "-Y"
+      instant_beverages003: "-Y"
+      instant_beverages004: "+Y"
+      instant_beverages005: "+Y"
+      instant_beverages007: "-Y"
+      instant_beverages009: "-Y"
+      instant_beverages010: "-Y"
+      instant_beverages011: "-Y"
+      flour001: "-X"
+      flour002: "+Y"
+      flour003: "+Y"
+      flour004: "+Y"
+      flour005: "+Y"
+      flour006: "+Y"
+      flour007: "+Y"
+      detergent001: "+Y"
+      detergent002: "+Y"
+      detergent003: "-Y"
+      detergent004: "+Y"
+      detergent005: "+Y"
+      detergent006: "+Y"
+      detergent007: "+Y"
+      detergent008: "-Y"
+      detergent009: "-Y"
+      detergent010: "-Y"
+      detergent011: "-Y"
+      cereal001: "-Y"
+      cereal002: "-Y"
+
+# ── Lighting: the store's own lights, jittered by pattern ────────────────────
+dome_light: False                               # no synthetic dome/key over the store lighting
+distant_light: False
+# The 19 store lights live at /World/Store/model_store001/v_0/light (RectLight x7,
+# DiskLight x12); "*Light*" matches their type-suffixed prim names, NOT the E_light*
+# fixture-geometry Xforms (case-sensitive fnmatch; non-lights are skipped anyway).
+# Factors are drawn LOG-uniformly (perceptually even in stops); [0.25, 8] spans the
+# visually-verified envelope: 0.25x dim-but-legible floor .. 8x soft-bleached extreme.
+light_jitter_patterns:
+  - {root: "/World/Store", pattern: "*Light*", intensity_scale_range: [0.25, 8.0]}
+
+# ── Poses: grasp-frame +X = outward face normal → camera halo out in the aisle ─
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.3, 0.9]
+yrange: [-0.3, 0.3]
+zrange: [-0.2, 0.3]
+
+# ── Catalog (Stage-B output) + per-run SKU subset (no re-extraction needed) ──
+objects_path:
+  - datasets/store001-optflow-objects-keep
+filter_specs: []                                # keep ALL 42 (no cereal smoke subset)
+
+placement: UntilExhaustedStacker                # required by RuntimeConfig; unused in store mode
+placement_args: {}
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32

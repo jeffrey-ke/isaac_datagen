@@ -42,7 +42,8 @@ def plan_capture(runtime, scene):
         (idx, grasp_points, world_poses): the chosen grasp-point indices, their
         prim paths, and the (B*N, 4, 4) world camera poses (targets × planned poses).
     """
-    idx = np.random.choice(len(scene.grasp_points), size=runtime.num_targets)
+    idx = (np.arange(len(scene.grasp_points)) if runtime.num_targets is None
+           else np.random.choice(len(scene.grasp_points), size=runtime.num_targets))
     grasp_points = [scene.grasp_points[i] for i in idx]
     target2worlds = get_target2world(grasp_points)                       # (B, 4, 4)
     poser = posers.get(runtime.pose_generation_policy)(**runtime.pose_generation_policy_args)

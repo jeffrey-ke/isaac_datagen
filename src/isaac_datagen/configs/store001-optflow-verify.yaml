@@ -1,0 +1,74 @@
+# store001 VERIFICATION render (Stage C only): one in-store frame per kept object, camera on
+# each object's grasp +X normal, with every SKU class NOT in the keep catalog deactivated
+# (RemoveUntrackedProducts). Requires the keep catalog first — build it via Stages A+B of
+# configs/store001-optflow-keep.yaml. num_targets:null => every tracked object once.
+#   Stage C  isaac-datagen configs/store001-optflow-verify.yaml idx=0
+mode: optflow
+scene: empty                    # consumed only by build_scene; build_store_scene ignores it
+seed: 1
+idx: 0
+num_targets: null
+num_frames: 1
+dataset_dir: datasets/store001-optflow-verify   # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:0
+proposer_device: cpu
+dry_run: False
+inlier_border_eps: 0.0
+
+# ── Store scene (Stage A + Stage C single source of truth) ──────────────────
+scene_builder: build_store_scene                # scene_builders registry key (explicit selector)
+scene_builder_args:
+  store_usd: ../../../usds/store001.usd
+  product_patterns: ["model_snack*", "model_instant_beverages*", "model_flour*",
+                     "model_detergent*", "model_sauces*", "model_cereal*", "model_drink101*"]
+  grasp_frame_policy: FixedFaceGrasp            # grasp_policies registry key — REQUIRED
+  grasp_frame_policy_args: {face: "-Y"}         # verify the aisle-facing local face in the GUI (M0)
+  mutations:
+    - {name: RemoveUntrackedProducts}
+    - name: RemovePrims                           # 12 label-inward facings (fronts point into the
+      args:                                       # gondola, unphotographable in-store) + 2 coincident
+        names: [model_snack012_3, model_snack012_4, model_snack012_5, model_snack012_6,
+                model_snack012_7, model_snack012_8, model_snack012_9, model_snack012_10,
+                model_snack032_4, model_snack032_5, model_snack032_6, model_snack032_7,
+                model_detergent001_3, model_snack025_2]
+        #  duplicate twins (0.00mm from detergent001 / snack025_1 → non-labelable redundant frames).
+        #  breezy-wishing-emerson.md RESOLVED + FIX EXECUTED sections (pose vs cam2world + iid scan).
+
+# ── Lighting: the store's own lights, jittered by pattern ────────────────────
+dome_light: False                               # no synthetic dome/key over the store lighting
+distant_light: False
+# The 19 store lights live at /World/Store/model_store001/v_0/light (RectLight x7,
+# DiskLight x12); "*Light*" matches their type-suffixed prim names, NOT the E_light*
+# fixture-geometry Xforms (case-sensitive fnmatch; non-lights are skipped anyway).
+# Factors are drawn LOG-uniformly (perceptually even in stops); [0.25, 8] spans the
+# visually-verified envelope: 0.25x dim-but-legible floor .. 8x soft-bleached extreme.
+light_jitter_patterns:
+  - {root: "/World/Store", pattern: "*Light*", intensity_scale_range: [0.25, 8.0]}
+
+# ── Poses: grasp-frame +X = outward face normal → camera halo out in the aisle ─
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.6, 0.6]
+yrange: [0.0, 0.0]
+zrange: [0.0, 0.0]
+
+# ── Catalog (Stage-B output) + per-run SKU subset (no re-extraction needed) ──
+objects_path:
+  - datasets/store001-optflow-objects-keep
+filter_specs: []
+
+placement: UntilExhaustedStacker                # required by RuntimeConfig; unused in store mode
+placement_args: {}
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32

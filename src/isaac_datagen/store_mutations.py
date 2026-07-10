@@ -113,12 +113,12 @@ def measure_site(stage, prim, policy) -> ProductSite:
     """Read everything off the original product before it is deactivated."""
     from isaac_datagen.capture import get_target2world
     from isaac_datagen.isaac_utils import untransformed_bbox_range
-    name, _ = parse_sku(prim.GetName())
+    name, cls = parse_sku(prim.GetName())
     v0_path = f"{prim.GetPath().pathString}/v_0"
     assert stage.GetPrimAtPath(v0_path).IsValid(), f"no v_0 under {prim.GetPath()}"  # Stage-A contract
     lo, hi = _bbox(untransformed_bbox_range(stage.GetPrimAtPath(v0_path)))
     return ProductSite(name=name, path=prim.GetPath().pathString, lo=lo, hi=hi,
-                       l2w=get_target2world([v0_path])[0], grasp=policy(lo, hi))
+                       l2w=get_target2world([v0_path])[0], grasp=policy(lo, hi, cls))
 
 
 def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r) -> np.ndarray:
@@ -203,3 +203,43 @@ class ReplaceClass:
             print(f"[MUT] ReplaceClass({self.pattern!r}): {site.path} -> "
                   f"{added[-1].obj.meta['name']}", flush=True)
         return _drop_under(targets, removed) + added
+
+
+class RemoveUntrackedProducts:
+    """Deactivate EVERY active store product (scoped to spec.product_patterns) whose SKU
+    class is NOT among the tracked targets — the keep-list COMPLEMENT. Drops the SKUs a
+    curated keep-list leaves out in one spec, without enumerating them (the front-face
+    keep-map lists only what to keep). Store-wide, like RemoveClass; untracked prims have
+    no CaptureTarget binding, so targets pass through unchanged."""
+    def __call__(self, store, spec, targets, rng):
+        from isaac_datagen.isaac_utils import deactivate_prim
+        tracked = {t.obj.meta["class"] for t in targets}
+        removed = []
+        for prim in active_products(store, spec.product_patterns):
+            if parse_sku(prim.GetName())[1] not in tracked:    # [1] = SKU class
+                removed.append(prim.GetPath().pathString)
+                deactivate_prim(prim)                          # model_* root, not v_0
+        print(f"[MUT] RemoveUntrackedProducts: deactivated {len(removed)} untracked "
+              f"product(s), kept {len(tracked)} classes", flush=True)
+        return _drop_under(targets, removed)
+
+
+class RemovePrims:
+    """Deactivate specific store products by EXACT prim name (e.g. 'model_snack012_3') and
+    prune their CaptureTargets. Per-instance complement of RemoveClass — for store-authoring
+    quirks (label-inward / permanently occluded facings) where the class stays but individual
+    facings must go. Fail-loud: every name must match an active product under the config globs."""
+    def __init__(self, names: list):
+        assert names, "RemovePrims needs a non-empty prim-name list"
+        self.names = list(names)
+
+    def __call__(self, store, spec, targets, rng):
+        from isaac_datagen.isaac_utils import deactivate_prim
+        by_name = {p.GetName(): p for p in active_products(store, spec.product_patterns)}
+        missing = sorted(set(self.names) - set(by_name))
+        assert not missing, f"RemovePrims: no active product prim named {missing}"
+        removed = [by_name[n].GetPath().pathString for n in self.names]
+        for n in self.names:
+            deactivate_prim(by_name[n])                        # model_* root, like RemoveClass
+        print(f"[MUT] RemovePrims: deactivated {len(removed)} product prim(s)", flush=True)
+        return _drop_under(targets, removed)
