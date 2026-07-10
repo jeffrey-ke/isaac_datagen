@@ -15,3 +15,7 @@ wheels/
 /assets
 /datasets
 /src/isaac_datagen/datasets
+
+# One-off debug renders (large, not source) — e.g. store-front-face-check.md's per-tile probes.
+/src/isaac_datagen/debug_out
+/src/isaac_datagen/debug_out_8x
