@@ -1,0 +1,72 @@
+# store001 snacks TRAINING dataset, set 2 (Stage C ONLY — reuses the store001-optflow-objects-keep
+# catalog built by Stages A+B of store001-optflow-keep.yaml; no re-extraction, no reference render).
+# Four snacks classes (snack031/033/034/035) are the ONLY targets — CLASS-DISJOINT from set 1, so
+# these are held out from set 1 — AND the only products left active on the shelves:
+# RemoveUntrackedProducts deactivates every other product under the 7 product globs (cataloged or
+# not), and require_tracked_only fail-louds at scene build if any present-but-unlabeled product
+# survives; shelf/environment assets under model_store001 stay (they match no product glob). Every
+# facing of each class is a target ONCE (num_targets:null), 40 LookAtPoser views each → 28×40 = 1120.
+#   Stage C  isaac-datagen configs/store001-optflow-snacks-set2.yaml idx=0
+mode: optflow
+scene: empty                    # consumed only by build_scene; build_store_scene ignores it
+seed: 1
+idx: 0
+num_targets: null               # every facing of each kept class ONCE = "default instances per class"
+num_frames: 40                  # 40 LookAtPoser views per facing → 28 facings × 40 = 1120 frames
+dataset_dir: datasets/store001-optflow-snacks-set2   # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:0
+proposer_device: cpu
+dry_run: False
+inlier_border_eps: 0.0
+
+# ── Store scene (Stage C) ────────────────────────────────────────────────────
+scene_builder: build_store_scene                # scene_builders registry key (explicit selector)
+scene_builder_args:
+  store_usd: ../../../usds/store001.usd
+  product_patterns: ["model_snack*", "model_instant_beverages*", "model_flour*",
+                     "model_detergent*", "model_sauces*", "model_cereal*", "model_drink101*"]
+  #  ^ removal + gate scope — the verify config's FULL 7-glob product inventory (drink101 was
+  #    missing here: in the store, never cataloged — without its glob it survives removal)
+  grasp_frame_policy: FixedFaceGrasp            # UNUSED at Stage C — grasp_point is replayed from the
+  grasp_frame_policy_args: {face: "-Y"}         #   baked catalog (add_catalog_grasp_frame); validator only
+  mutations:
+    - {name: RemoveUntrackedProducts}   # drop every product whose class ∉ the filter_specs ids
+  require_tracked_only: ["model_snack*", "model_instant_beverages*", "model_flour*",
+                         "model_detergent*", "model_sauces*", "model_cereal*", "model_drink101*"]
+  #  ^ build-time leak gate: after mutations, every active product here must be a labeled target
+
+# ── Lighting: the store's own lights, jittered by pattern ────────────────────
+dome_light: False                               # no synthetic dome/key over the store lighting
+distant_light: False
+light_jitter_patterns:
+  - {root: "/World/Store", pattern: "*Light*", intensity_scale_range: [0.25, 8.0]}
+
+# ── Poses: LookAtPoser halo box (validated store training ranges) ─────────────
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.3, 0.9]
+yrange: [-0.3, 0.3]
+zrange: [-0.2, 0.3]
+
+# ── Catalog (Stage-B output) + per-run SKU subset (targets = 4 snacks classes) ─
+objects_path:
+  - datasets/store001-optflow-objects-keep
+filter_specs:
+  - name: RegexFilter                           # inclusion filter on meta["class"] (re.search)
+    args: {key: class, value: '^(snack031|snack033|snack034|snack035)$'}   # anchored: exact classes
+
+placement: UntilExhaustedStacker                # required by RuntimeConfig; unused in store mode
+placement_args: {}
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32

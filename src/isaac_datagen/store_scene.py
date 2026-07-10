@@ -34,6 +34,10 @@ class StoreSceneSpec:
     # Names validated here; ctor args validated by make_mutations at build time
     # (Stage A never needs the swap catalogs).
     mutations: list = field(default_factory=list)
+    # Stage-C only: prim-name globs under which EVERY active product's SKU class must be a
+    # labeled target after mutations run — a fail-loud scene-content gate (the label-only
+    # cid_to_class check can't see a present-but-unlabeled product). Default [] = no gate.
+    require_tracked_only: list = field(default_factory=list)
 
     def __post_init__(self):
         assert Path(self.store_usd).exists(), f"store_usd missing: {self.store_usd}"
@@ -44,6 +48,8 @@ class StoreSceneSpec:
             assert isinstance(m, dict) and m.get("name") and set(m) <= {"name", "args"}, \
                 f"mutation spec must be {{name, args?}}: {m!r}"
             store_mutations.get(m["name"])             # KeyError at load, not mid-run
+        assert all(self.require_tracked_only), \
+            f"require_tracked_only globs must be non-empty: {self.require_tracked_only}"
 
 
 def load_store(spec: StoreSceneSpec):
@@ -145,6 +151,13 @@ def build_store_scene(runtime, objects) -> SceneHandle:
     assert targets, "store mutations left no captureable targets"
     names = [t.obj.meta["name"] for t in targets]           # mutations mint names
     assert len(names) == len(set(names)), f"duplicate names after mutations: {names}"
+
+    tracked = {t.obj.meta["class"] for t in targets}
+    for glob in spec.require_tracked_only:
+        leaked = sorted(p.GetName() for p in store_mutations.active_products(store, [glob])
+                        if store_mutations.parse_sku(p.GetName())[1] not in tracked)
+        assert not leaked, (f"require_tracked_only {glob!r}: untracked products still active "
+                            f"(scene leak — present but unlabeled): {leaked}")
 
     stage = store.GetStage()
     object_prim_paths, grasp_frames = [], []
