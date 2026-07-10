@@ -1,0 +1,84 @@
+# K-shot FINE-TUNE POOL for held-out class snack035, ONE PHYSICAL INSTANCE ONLY (Stage C ONLY —
+# reuses the store001-optflow-objects-keep catalog; no re-extraction, no reference render). This
+# is NOT set2 — set2 is the frozen held-out VALIDATION set and must never be trained on. Sibling
+# of `store001-optflow-snacks-kshot-snack035.yaml` (variant A, every instance of the class); this
+# is variant B — the literal "walk around ONE object" reading of roadmap I.4's surround-shot
+# protocol. `filter_specs` still tracks the whole class (unchanged), but an added `RemovePrims`
+# mutation deactivates every OTHER instance of snack035 by exact live-store prim name, so only
+# `model_snack035` remains active. `num_targets: null` then naturally yields exactly one target —
+# no sampling knob needed, since there is only one instance left to target after removal.
+# (num_targets alone does NOT achieve this: it only picks which instance gets PHOTOGRAPHED, not
+# which instances stay PRESENT — RemoveUntrackedProducts's keep-set is derived per-class, not
+# per-instance, so the other instances would otherwise sit on the shelf unphotographed but still
+# visible.) 25 LookAtPoser views of the one remaining instance; fine-tune takes the ordinal first
+# K of these per K-shot arm.
+#   Stage C  isaac-datagen configs/store001-optflow-snacks-kshot-snack035-1inst.yaml idx=0
+mode: optflow
+scene: empty                    # consumed only by build_scene; build_store_scene ignores it
+seed: 1
+idx: 0
+num_targets: null               # only one instance remains active after RemovePrims below -> exactly one target
+num_frames: 25                  # 25 LookAtPoser views of that one instance
+dataset_dir: datasets/store001-optflow-snacks-kshot-snack035-1inst   # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:0
+proposer_device: cpu
+dry_run: False
+inlier_border_eps: 0.0
+
+# ── Store scene (Stage C) ────────────────────────────────────────────────────
+scene_builder: build_store_scene                # scene_builders registry key (explicit selector)
+scene_builder_args:
+  store_usd: ../../../usds/store001.usd
+  product_patterns: ["model_snack*", "model_instant_beverages*", "model_flour*",
+                     "model_detergent*", "model_sauces*", "model_cereal*", "model_drink101*"]
+  #  ^ removal + gate scope — the verify config's FULL 7-glob product inventory (drink101 was
+  #    missing here: in the store, never cataloged — without its glob it survives removal)
+  grasp_frame_policy: FixedFaceGrasp            # UNUSED at Stage C — grasp_point is replayed from the
+  grasp_frame_policy_args: {face: "-Y"}         #   baked catalog (add_catalog_grasp_frame); validator only
+  mutations:
+    - {name: RemoveUntrackedProducts}   # drop every product whose class != snack035 (the ONLY tracked id)
+    - {name: RemovePrims,               # THEN drop every OTHER snack035 instance by exact prim name —
+       args: {names: ["model_snack035_1", "model_snack035_2", "model_snack035_3",
+                       "model_snack035_4", "model_snack035_5", "model_snack035_6",
+                       "model_snack035_7"]}}
+       # ^ keeps only `model_snack035` active; names taken from meta/meta_*.yaml's `store_prim`
+       #   field (stripped of the /v_0 mesh-child suffix) for every snack035 instance but one.
+  require_tracked_only: ["model_snack*", "model_instant_beverages*", "model_flour*",
+                         "model_detergent*", "model_sauces*", "model_cereal*", "model_drink101*"]
+  #  ^ build-time leak gate: after mutations, every active product here must be a labeled target
+
+# ── Lighting: the store's own lights, jittered by pattern ────────────────────
+dome_light: False                               # no synthetic dome/key over the store lighting
+distant_light: False
+light_jitter_patterns:
+  - {root: "/World/Store", pattern: "*Light*", intensity_scale_range: [0.25, 8.0]}
+
+# ── Poses: LookAtPoser halo box (validated store training ranges) ─────────────
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.3, 0.9]
+yrange: [-0.3, 0.3]
+zrange: [-0.2, 0.3]
+
+# ── Catalog (Stage-B output) + per-run SKU subset (target = ONE class only) ──
+objects_path:
+  - datasets/store001-optflow-objects-keep
+filter_specs:
+  - name: RegexFilter                           # inclusion filter on meta["class"] (re.search)
+    args: {key: class, value: '^(snack035)$'}   # anchored: exactly this one class
+
+placement: UntilExhaustedStacker                # required by RuntimeConfig; unused in store mode
+placement_args: {}
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32
