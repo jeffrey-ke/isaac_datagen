@@ -19,3 +19,6 @@ wheels/
 # One-off debug renders (large, not source) — e.g. store-front-face-check.md's per-tile probes.
 /src/isaac_datagen/debug_out
 /src/isaac_datagen/debug_out_8x
+
+# Personal scratch — notes, evidence dumps, anything not meant to be committed.
+/.scratch
