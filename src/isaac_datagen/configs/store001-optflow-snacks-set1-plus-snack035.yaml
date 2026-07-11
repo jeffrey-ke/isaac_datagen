@@ -1,23 +1,20 @@
-# K-shot FINE-TUNE POOL for held-out class snack031 (Stage C ONLY — reuses the
-# store001-optflow-objects-keep catalog; no re-extraction, no reference render). This is NOT
-# set2 — set2 (snack031/033/034/035 together) is the frozen held-out VALIDATION set and must
-# never be trained on. This render is the separate surround-shot capture session (roadmap I.4)
-# that supplies K-shot training data: single class only, every instance of it kept active on
-# the shelf (variant A — the sibling `-1inst` config isolates to exactly one physical instance).
-# RemoveUntrackedProducts deactivates every OTHER product under the 7 product globs (cataloged or
-# not); require_tracked_only fail-louds at scene build if any present-but-unlabeled product
-# survives; shelf/environment assets under model_store001 stay (they match no product glob).
-# Every instance of snack031 is a target ONCE (num_targets:null), 25 LookAtPoser views each
-# (reduced from set1/set2's 40 — the K-shot ladder tops out at K=25, so 25 views/instance is
-# already enough; the fine-tune step takes the ordinal first K of these per arm).
-#   Stage C  isaac-datagen configs/store001-optflow-snacks-kshot-snack031.yaml idx=0
+# store001 snacks REHEARSAL FINE-TUNE dataset: set1's 4 train classes + held-out snack035 tracked
+# together (Stage C ONLY — reuses the store001-optflow-objects-keep catalog; no re-extraction, no
+# reference render). This is NOT set2 — set2 is the frozen held-out VALIDATION benchmark and must
+# never appear in a fine-tune's data.paths. The five classes are the ONLY targets AND the only
+# products left active on the shelves: RemoveUntrackedProducts deactivates every other product under
+# the 7 product globs, and require_tracked_only fail-louds at scene build if any present-but-
+# unlabeled product survives. Every facing of each class is a target ONCE (num_targets:null), each
+# rendered from 40 LookAtPoser views → (25+8)×40 = 1320 frames.
+#   Stage C  isaac-datagen configs/store001-optflow-snacks-set1-plus-snack035.yaml idx=0
 mode: optflow
 scene: empty                    # consumed only by build_scene; build_store_scene ignores it
-seed: 1
+seed: 2001                      # 2001-series = set1+X rehearsal family; NOT 1 (set1/set2's seed) —
+                                #   no shared pose stream with the frozen set2 benchmark
 idx: 0
-num_targets: null               # every instance of the kept class ONCE = "default instances per class"
-num_frames: 25                  # 25 LookAtPoser views per instance — matches the K-shot ladder's max K
-dataset_dir: datasets/store001-optflow-snacks-kshot-snack031   # MUST pre-exist
+num_targets: null               # every facing of each kept class ONCE = "default instances per class"
+num_frames: 40                  # 40 LookAtPoser views per facing → 33 facings × 40 = 1320 frames
+dataset_dir: datasets/store001-optflow-snacks-set1-plus-snack035   # MUST pre-exist
 intrinsics_path: zed_K.npy
 
 descriptor_device: cuda:0
@@ -36,7 +33,7 @@ scene_builder_args:
   grasp_frame_policy: FixedFaceGrasp            # UNUSED at Stage C — grasp_point is replayed from the
   grasp_frame_policy_args: {face: "-Y"}         #   baked catalog (add_catalog_grasp_frame); validator only
   mutations:
-    - {name: RemoveUntrackedProducts}   # drop every product whose class != snack031 (the ONLY tracked id)
+    - {name: RemoveUntrackedProducts}   # drop every product whose class ∉ the filter_specs ids
   require_tracked_only: ["model_snack*", "model_instant_beverages*", "model_flour*",
                          "model_detergent*", "model_sauces*", "model_cereal*", "model_drink101*"]
   #  ^ build-time leak gate: after mutations, every active product here must be a labeled target
@@ -57,12 +54,15 @@ xrange: [0.3, 0.9]
 yrange: [-0.3, 0.3]
 zrange: [-0.2, 0.3]
 
-# ── Catalog (Stage-B output) + per-run SKU subset (target = ONE class only) ──
+# ── Catalog (Stage-B output) + per-run SKU subset (targets = set1 + snack035) ─
 objects_path:
-  - datasets/store001-optflow-objects-keep
+  - ../../assets/optflow_objects/store001-optflow-objects-keep   # catalog moved 2026-07-10; set1's
+    # own `datasets/...` value is stale — do not copy it
 filter_specs:
   - name: RegexFilter                           # inclusion filter on meta["class"] (re.search)
-    args: {key: class, value: '^(snack031)$'}   # anchored: exactly this one class — the isolation change
+    args: {key: class, value: '^(snack017|snack020|snack023|snack027|snack035)$'}   # anchored:
+    # set1's exact 4 classes + the one held-out class; RemoveUntrackedProducts derives its
+    # keep-set from this — single source of truth
 
 placement: UntilExhaustedStacker                # required by RuntimeConfig; unused in store mode
 placement_args: {}

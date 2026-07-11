@@ -1,25 +1,26 @@
 # K-shot FINE-TUNE POOL for held-out class snack031, ONE PHYSICAL INSTANCE ONLY (Stage C ONLY —
 # reuses the store001-optflow-objects-keep catalog; no re-extraction, no reference render). This
-# is NOT set2 — set2 is the frozen held-out VALIDATION set and must never be trained on. Sibling
-# of `store001-optflow-snacks-kshot-snack031.yaml` (variant A, every instance of the class); this
-# is variant B — the literal "walk around ONE object" reading of roadmap I.4's surround-shot
-# protocol. `filter_specs` still tracks the whole class (unchanged), but an added `RemovePrims`
+# is NOT set2 — set2 is the frozen held-out VALIDATION set and must never be trained on. The
+# literal "walk around ONE object" reading of roadmap I.4's surround-shot protocol (the all-facings
+# variant A sibling was deleted 2026-07-11 — see plans/active/store-snacks-finetune-renders.md).
+# `filter_specs` still tracks the whole class (unchanged), but an added `RemovePrims`
 # mutation deactivates every OTHER instance of snack031 by exact live-store prim name, so only
 # `model_snack031` remains active. `num_targets: null` then naturally yields exactly one target —
 # no sampling knob needed, since there is only one instance left to target after removal.
 # (num_targets alone does NOT achieve this: it only picks which instance gets PHOTOGRAPHED, not
 # which instances stay PRESENT — RemoveUntrackedProducts's keep-set is derived per-class, not
 # per-instance, so the other instances would otherwise sit on the shelf unphotographed but still
-# visible.) 25 LookAtPoser views of the one remaining instance; fine-tune takes the ordinal first
-# K of these per K-shot arm.
+# visible.) 200 LookAtPoser views of the one remaining instance (200-frame budget); fine-tune takes
+# the ordinal first K of these per K-shot arm.
 #   Stage C  isaac-datagen configs/store001-optflow-snacks-kshot-snack031-1inst.yaml idx=0
 mode: optflow
 scene: empty                    # consumed only by build_scene; build_store_scene ignores it
-seed: 1
+seed: 1001                      # 1001-series = solo fine-tune pools; NOT 1 (set1/set2's seed) — no
+                                #   shared pose stream with the frozen set2 benchmark
 idx: 0
 num_targets: null               # only one instance remains active after RemovePrims below -> exactly one target
-num_frames: 25                  # 25 LookAtPoser views of that one instance
-dataset_dir: datasets/store001-optflow-snacks-kshot-snack031-1inst   # MUST pre-exist
+num_frames: 200                 # 200 LookAtPoser views of that one instance (1 target x 200 = 200 frames)
+dataset_dir: datasets/snack031-1inst   # MUST pre-exist
 intrinsics_path: zed_K.npy
 
 descriptor_device: cuda:0
@@ -66,7 +67,7 @@ zrange: [-0.2, 0.3]
 
 # ── Catalog (Stage-B output) + per-run SKU subset (target = ONE class only) ──
 objects_path:
-  - datasets/store001-optflow-objects-keep
+  - ../../assets/optflow_objects/store001-optflow-objects-keep
 filter_specs:
   - name: RegexFilter                           # inclusion filter on meta["class"] (re.search)
     args: {key: class, value: '^(snack031)$'}   # anchored: exactly this one class
