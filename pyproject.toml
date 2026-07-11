@@ -23,6 +23,10 @@ dependencies = [
     "vision-core",
     "reference-matching",
     "fpsample<1",
+    # background-library ingest scripts only (.docs_claude/one_off_tests/download_background_datasets.py):
+    # HF streaming + capped download, and Kaggle dataset download (needs a Kaggle API token).
+    "datasets",
+    "kagglehub",
 ]
 
 [project.optional-dependencies]
