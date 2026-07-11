@@ -5,8 +5,9 @@
 is now the 4 `-1inst` configs only (user decision: "only keep the 1inst"); the 4 all-instances
 variant-A yamls (`store001-optflow-snacks-kshot-<class>.yaml`) were `git rm`'d. The kept `-1inst`
 configs were reseeded `seed: 1 → 1001` so no fine-tune render shares `set2`'s effective seed
-(both were 1 → pose-stream overlap risk with the frozen benchmark). Everything below about
-variant A is historical.
+(both were 1 → pose-stream overlap risk with the frozen benchmark). The 4 `-1inst` renders were
+launched and gate-verified the same day (see the finetune plan) — this plan is COMPLETE.
+Everything below about variant A is historical.
 
 **Status 2026-07-09: Config work DONE, renders PENDING.** Revised after review (see below) to 8
 configs (4 classes × {all-instances, one-instance} variants), `num_frames` 40→25, and a

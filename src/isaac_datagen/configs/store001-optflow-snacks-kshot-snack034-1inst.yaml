@@ -2,7 +2,7 @@
 # reuses the store001-optflow-objects-keep catalog; no re-extraction, no reference render). This
 # is NOT set2 — set2 is the frozen held-out VALIDATION set and must never be trained on. The
 # literal "walk around ONE object" reading of roadmap I.4's surround-shot protocol (the all-facings
-# variant A sibling was deleted 2026-07-11 — see plans/active/store-snacks-finetune-renders.md).
+# variant A sibling was deleted 2026-07-11 — see plans/completed/store-snacks-finetune-renders.md).
 # `filter_specs` still tracks the whole class (unchanged), but an added `RemovePrims`
 # mutation deactivates every OTHER instance of snack034 by exact live-store prim name, so only
 # `model_snack034` remains active. `num_targets: null` then naturally yields exactly one target —
