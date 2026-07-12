@@ -1,19 +1,3 @@
-"""Spot-check viz for ObsMask occlusion ratios.
-
-Thin CLI over ``vision_core.viz``: draws a RANDOM sample of frames across a
-generated dataset and renders one ``occlusion_panel`` per frame — each iid's
-mask overlaid in a unique color, the occlusion ratio printed at the mask
-centroid, and an iid→name→ratio legend in the right gutter. Buried /
-frame-edge objects should carry high ratios, clearly-visible ones near 0.
-Deliberately stays in INSTANCE space (occlusion is per-instance); see
-viz_inliers for the class-space view.
-
-Usage:
-    isaac-datagen-viz-occlusion <dataset_dir> [--n 12] [--seed 0] [--cols 4]
-        [--alpha 0.45] [--dpi 200] [--out PATH]
-``<dataset_dir>`` is the directory holding ``render000/``, ``render001/``, … (i.e.
-``runtime.dataset_dir``); the sample is drawn across ALL render dirs under it.
-"""
 
 import argparse
 import functools
@@ -29,7 +13,6 @@ from vision_core.viz import error_panel, occlusion_panel, panel_grid, save_figur
 
 
 def frame_pairs(dataset_dir: Path):
-    """All (render_dir, frame_idx) pairs under a dataset root, for random sampling."""
     return [(rd, i)
             for rd in sorted(p for p in dataset_dir.glob("render*") if p.is_dir())
             if (rd / "obs").is_dir()
@@ -55,12 +38,11 @@ def main():
 
     metadata = functools.cache(lambda rd: ObsMaskDescriptorMetadata.deserialize(0, rd))
 
-    # wide wspace leaves a gutter for each panel's external (right-side) legend
     fig, axes = panel_grid(len(sample), args.cols, 6.2, 4.6, wspace=0.6, hspace=0.2)
     for ax, (rd, idx) in zip(axes, sample):
         try:
             occlusion_panel(ax, ObsMask.deserialize(idx, rd), metadata(rd), alpha=args.alpha)
-        except Exception as e:  # e.g. old-schema dirs (missing cid_mask/ or pre-rename fields)
+        except Exception as e:
             error_panel(ax, f"{rd.name}/{idx:04d}", e)
             continue
         ax.set_title(f"{rd.name}/{idx:04d}", fontsize=8)

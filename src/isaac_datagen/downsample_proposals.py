@@ -1,21 +1,3 @@
-"""Phase-2.5 pass: FPS-downsample each class's proposal points to at most K.
-
-Runs AFTER ``add_proposals`` and BEFORE ``add_inlier_data`` (phase-3 labels each
-proposal point, so downsampling later would desync labels from kept points).
-NN-free and fast — pure I/O plus cheap CPU math, no sharding needed. For each
-frame, each class's ``(N, 2)`` proposal tensor is reduced to ``K`` spatially
-spread points via furthest point sampling; classes with ``N <= K`` are kept
-as-is, empty entries are dropped. Writes residually via
-``serialize(idx, dir, only={"proposals"})`` — ``obs/`` and ``cid_mask/`` are
-never rewritten; writes are atomic, so the pass is safely re-runnable and
-idempotent (a second run finds nothing to shrink and writes nothing).
-
-FPS via the ``fpsample`` library (pinned <1: 1.x ships no wheel here). Always
-``start_idx=0`` — the default start is random, and this pass rewrites the
-dataset, so it must be reproducible.
-
-Usage: isaac-datagen-downsample-proposals <render_dir> [--max-points 256] [--dry-run]
-"""
 
 import argparse
 from pathlib import Path
@@ -28,10 +10,6 @@ from vision_core.sampling import fps_indices
 
 
 def fps_downsample(xy: torch.Tensor, k: int) -> torch.Tensor:
-    """At most k spatially spread rows of an (N, 2) coord tensor, deterministically.
-
-    Rows-returning wrapper over the shared ``vision_core.sampling.fps_indices`` (which
-    returns indices, handles N<=k as identity, and pins start_idx=0)."""
     return xy[fps_indices(xy, k)]
 
 
@@ -49,7 +27,7 @@ def main():
         new_proposals = {}
         for cls, xy in pre.proposals.items():
             pts_before += xy.shape[0]
-            if xy.shape[0] == 0:  # legacy frames predate the drop-empties producer fix
+            if xy.shape[0] == 0:
                 n_empties += 1
                 continue
             kept = fps_downsample(xy, args.max_points)

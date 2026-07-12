@@ -1,13 +1,3 @@
-"""Interactively relabel the `class` field of serialized GraspableObjects.
-
-Deserializes every GraspableObject in a dataset directory, writes a grid png
-of the reference images labeled by serialization index, then prompts per
-sample for a new one-word class name and re-serializes the meta field in
-place (residual serialization: only={"meta"} leaves usdz/png/npy untouched).
-
-    uv run src/isaac_datagen/relabel_classes.py <dataset_dir>
-    uv run src/isaac_datagen/relabel_classes.py <dataset_dir> --grid-only
-"""
 
 import argparse
 import math
@@ -39,7 +29,6 @@ def write_grid(samples, indices, out_path: Path, cols: int = 8):
 
 
 def relabel(samples, indices, directory: Path):
-    """Prompt per sample; enter keeps the current class, anything else overwrites."""
     for idx, sample in zip(indices, samples):
         answer = input(
             f"[{idx:04d}] {sample.meta['name']} class={sample.meta['class']!r} -> "

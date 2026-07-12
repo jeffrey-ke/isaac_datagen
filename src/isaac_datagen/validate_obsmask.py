@@ -1,17 +1,3 @@
-"""Per-frame ObsMask cid/iid consistency check (NN-free).
-
-Each graspable instance visible on a frame (keys of ``obs.iid_to_occlusion``) must
-map to a valid class id in ``cid_mask`` (cid >= 2; 0=BACKGROUND, 1=UNLABELLED).
-Catches writer bugs where ``iid_mask`` segments an object but ``cid_iid_masks`` fails
-to assign a class (e.g. tuna with 38k iid pixels and 0 ``fish can`` cid pixels).
-
-Membership is per-sample only — Isaac iids are session-local; do not union iids
-across frames or use ``ObsMaskDescriptorMetadata.iid_to_name`` for the check (catalog names are
-for error display only).
-
-Usage:
-    isaac-datagen-validate-obsmask <render_dir>
-"""
 
 from __future__ import annotations
 
@@ -38,12 +24,10 @@ class CidOrphan:
 
 
 def graspable_iids(obs: ObsMask) -> set[int]:
-    """Graspable instance iids present on this frame (writer: ``iid_to_occlusion`` keys)."""
     return {int(k) for k in obs.iid_to_occlusion}
 
 
 def load_obsmask(render_dir: Path, idx: int) -> ObsMask:
-    """One frame's masks + occlusion dict; skips RGBA load (dummy obs placeholder)."""
     iid_mask = ObsMask.deserialize_field(idx, render_dir, "iid_mask")
     cid_mask = ObsMask.deserialize_field(idx, render_dir, "cid_mask")
     iid_to_occlusion = ObsMask.deserialize_field(idx, render_dir, "iid_to_occlusion")
@@ -65,7 +49,6 @@ def load_obsmasks(render_dir: Path) -> list[ObsMask]:
 
 
 def check_obsmask(obs: ObsMask, frame: int, *, min_class_cid: int = MIN_CLASS_CID) -> list[CidOrphan]:
-    """Return cid orphans on this single frame (empty list if clean)."""
     iidm = obs.iid_mask.numpy()
     cidm = obs.cid_mask.numpy()
     orphans: list[CidOrphan] = []
@@ -76,7 +59,7 @@ def check_obsmask(obs: ObsMask, frame: int, *, min_class_cid: int = MIN_CLASS_CI
             orphans.append(CidOrphan(
                 frame=frame,
                 iid=iid,
-                name="?",  # filled by validate_render_dir from catalog (display only)
+                name="?",
                 n_pixels=int(pixels.sum()),
                 cids_seen=tuple(sorted(int(c) for c in set(cids.tolist()))),
             ))

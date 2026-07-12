@@ -1,15 +1,3 @@
-"""Driver: dry-run debug bundle (Isaac) -> Blender renders -> orbit.mp4.
-
-Optional, opt-in counterpart to the real pipeline (run_pipeline.py). Chains two
-subprocesses the same way run_pipeline does — Isaac releases the GPU only on
-process exit, so Blender runs after it:
-
-  1. isaac-datagen <config> ... dry_run=true   -> <render_dir>/debug/{scene.usdz, dryrun.npz}
-  2. blender --background --python blender_render.py -- <debug_dir>
-                                               -> debug/{poses/*.png, orbit.gif}
-
-Usage: isaac-datagen-debug-render <config.yaml> [key=value ...]
-"""
 
 import shutil
 import subprocess
@@ -45,16 +33,14 @@ def main():
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     debug_dir = render_dir / "debug"
 
-    # 1) Isaac dry run: build the scene, plan poses, export the bundle, exit (frees GPU).
     _run([_find("isaac-datagen"), *sys.argv[1:], "dry_run=true"], "isaac-datagen dry_run=true")
     if not (debug_dir / "scene.usdz").exists():
         sys.exit(f"dry run did not produce {debug_dir / 'scene.usdz'}")
 
-    # 2) Blender: pose-sanity + orbit renders.
     if shutil.which("blender") is None and not Path(BLENDER).exists():
         sys.exit(f"blender not found (looked for 'blender' on PATH and {BLENDER})")
     _run([BLENDER, "--background", "--python", str(BLENDER_SCRIPT), "--", str(debug_dir)],
-         "blender render")  # also assembles debug/orbit.gif and removes the frame folder
+         "blender render")
 
     print(f"\ndebug bundle + renders in {debug_dir} (poses/*.png + orbit.gif)", flush=True)
 

@@ -1,16 +1,3 @@
-"""In-place migrate class_to_descriptors from flattened (N, C) to spatial (C, h, w).
-
-DiftDescriptor now emits spatial (B, C, h, w); old datasets stored (N, C)
-(descriptor did `.flatten(1).T`). Inverts that flatten exactly:
-    flatten was:  (C, h, w) -> .flatten(1).T -> (N, C)   (row-major over h, w)
-    inverse here: (N, C) -> .T.reshape(C, h, w)          (h = w = isqrt(N), asserted)
-Idempotent (ndim==3 tensors skipped); each tensor round-trip checked
-(spatial.flatten(1).T == original, exact) before overwrite. IO goes through
-ObsMaskDescriptorMetadata.deserialize / serialize(only=...) — the same registered
-serializers (and atomic writes) the producer used.
-
-    uv run python src/isaac_datagen/migrate_descriptors_spatial.py <dataset_root>
-"""
 import argparse
 import math
 from pathlib import Path
@@ -22,7 +9,7 @@ from vision_core.datastructs import ObsMaskDescriptorMetadata
 
 def migrate_tensor(t: torch.Tensor) -> torch.Tensor | None:
     if t.ndim == 3:
-        return None                       # already spatial — idempotent skip
+        return None
     assert t.ndim == 2, f"expected (N, C) or (C, h, w), got {tuple(t.shape)}"
     n, c = t.shape
     h = math.isqrt(n)
@@ -33,7 +20,6 @@ def migrate_tensor(t: torch.Tensor) -> torch.Tensor | None:
 
 
 def migrate_render_dir(rd: Path) -> int:
-    """Migrate every catalog idx present (in practice one: idx 0). Returns #tensors migrated."""
     n_migrated = 0
     for pt_path in sorted((rd / "class_to_descriptors").glob("class_to_descriptors_*.pt")):
         idx = int(pt_path.stem.rsplit("_", 1)[1])
@@ -47,7 +33,7 @@ def migrate_render_dir(rd: Path) -> int:
                 print(f"    {cls:>12}: {tuple(t.shape)} -> {tuple(spatial.shape)}")
                 md.class_to_descriptors[cls] = spatial
                 file_migrated += 1
-        if file_migrated:                 # residual write: only this field's file, atomically
+        if file_migrated:
             md.serialize(idx, rd, only={"class_to_descriptors"})
         n_migrated += file_migrated
     return n_migrated

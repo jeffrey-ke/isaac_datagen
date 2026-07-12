@@ -1,17 +1,3 @@
-"""Visualize PreImageInlierSample inlier/outlier labels — a sanity check for phase-3.
-
-Thin CLI over ``vision_core.viz``: per selected frame, deserialize the
-PreImageInlierSample, build the inlier figure (overview panel of all class union
-masks + one proposal panel per class — green = inlier / red = outlier, union
-outline, canonical-ref thumbnail), and save it. All rendering primitives live
-in ``vision_core.viz`` (see ``inlier_figure`` and the leaves it composes).
-
-Usage:
-    isaac-datagen-viz-inliers <render_dir> [--out DIR] [--frames 0,5,10 |
-        --max-frames K --stride S] [--class "fish can"] [--cols 4] [--dpi 300]
-        [--max-points N]
-Requires phase-3 output (``labels/``); run ``isaac-datagen-inliers`` first.
-"""
 
 import argparse
 import sys
@@ -25,7 +11,6 @@ from vision_core.viz import inlier_figure, save_figure
 
 
 def select_frames(n_frames, explicit, stride, max_frames):
-    """CSV spec like "0,5,10" → those indices; else range(0, n, stride)[:max]."""
     if explicit:
         return [int(x) for x in explicit.split(",") if x.strip()]
     return list(range(0, n_frames, stride))[:max_frames]

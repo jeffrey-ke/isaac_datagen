@@ -1,23 +1,3 @@
-"""Debug the reference-segmentation scene: grasp points + USDZ export.
-
-Rebuilds exactly the scene `reference_segmentation()` builds (same objects
-slice, same seed, same pallet_dims), then:
-
-  1. Prints how many grasp points the scene actually has, the `np.random.choice`
-     indices that pick the per-target grasp frames, and the world-frame
-     translation of every grasp point — so you can SEE whether the targets are
-     distinct boxes or the same box repeated.
-  2. Exports the built `/World` to a self-contained `.usdz` you can open in any
-     USD viewer to inspect the geometry (e.g. why the 11x4 pallet renders as a
-     narrow tower).
-
-Run it the same way as clean_datagen.py, from src/isaac_datagen/:
-
-    uv run debug_scene.py configs/randomized.yaml [key=value ...]
-
-Diagnostics are printed AND written to <render_dir>/grasp_debug.txt, because
-Isaac Sim floods stdout with kit startup noise (see usdz_export_investigation).
-"""
 
 from __future__ import annotations
 
@@ -45,12 +25,9 @@ def main():
 
     render_dir = Path(runtime.dataset_dir) / f"render{runtime.idx:03d}"
     render_dir.mkdir(parents=True, exist_ok=True)
-    seed_everything(runtime.effective_seed)        # before boot_sim, mirroring reference_segmentation
+    seed_everything(runtime.effective_seed)
     app = boot_sim(runtime, render_dir)
 
-    # Mirror reference_segmentation() exactly so the diagnosis is faithful: same seed
-    # (global, via seed_everything), same build, same global np.random.choice for the
-    # grasp picks — so the indices below match what the real run draws.
     objects = collect_objects(runtime.objects_path)
     scene = build_scene(runtime, objects)
 
@@ -58,8 +35,8 @@ def main():
     idx = np.arange(n) if runtime.num_targets is None else np.random.choice(n, size=runtime.num_targets)
     selected = [scene.grasp_points[i] for i in idx]
 
-    all_t2w = get_target2world(scene.grasp_points)        # (n, 4, 4)
-    sel_t2w = get_target2world(selected)                  # (num_targets, 4, 4)
+    all_t2w = get_target2world(scene.grasp_points)
+    sel_t2w = get_target2world(selected)
 
     lines = []
     cap = int(np.prod(runtime.pallet_dims)) if runtime.pallet_dims else "n/a"
@@ -91,12 +68,9 @@ def main():
     usdz_path = export_subtree_usdz(stage, "/World", str(render_dir), base_name="scene")
     print(f"\nwrote {os.path.abspath(usdz_path)}")
 
-    # Extract each distinct selected box on its own. The grasp frame lives at
-    # ".../<box>/GraspPoint", so the box wrapper prim is its parent. Exporting
-    # that subtree alone lets you open it standalone and see which box was picked.
     seen = []
     for gp_path in selected:
-        box_path = gp_path.rsplit("/", 1)[0]   # strip "/GraspPoint"
+        box_path = gp_path.rsplit("/", 1)[0]
         if box_path in seen:
             continue
         seen.append(box_path)

@@ -1,16 +1,3 @@
-"""Build a GraspableObject dataset from arbitrary meshes (+ YCB download), in two phases.
-
-    uv run src/isaac_datagen/mesh_convert.py ycb       <download_dir>            # fetch YCB
-    uv run src/isaac_datagen/mesh_convert.py stage      <input_dir> <stage_dir>  # phase 1: render candidates
-    uv run src/isaac_datagen/mesh_convert.py finalize   <stage_dir> <output_dir> [winners.yaml]   # phase 2
-
-Phase 1 (`convert`/stage): a headless Blender subprocess (mesh_blender.py) exports each .usdz and
-renders the 4 side-face ortho tiles; everything is written to <stage>/<label>/ with unique labels,
-plus a candidate.json holding the 4 grasp SE3s. NO GraspableObject is serialized -- you pick the
-winning face offline. Phase 2 (`finalize`): pick the winning face + class per object (interactive
-prompt when no winners.yaml is given, else apply a pre-written one) -> serialize the dataset.
-Generalizes visual_servoing/datagen2_isaacsim/.build_object_dataset.py.bak.
-"""
 from __future__ import annotations
 import argparse, json, shutil, subprocess, tarfile, urllib.request
 from pathlib import Path
@@ -26,19 +13,11 @@ BLENDER = shutil.which("blender") or "/usr/local/bin/blender"
 MESH_BLENDER = Path(__file__).with_name("mesh_blender.py")
 MESH_EXTS = (".obj", ".ply", ".stl", ".glb", ".gltf", ".fbx", ".dae",
              ".usd", ".usdc", ".usda", ".usdz")
-# When a leaf folder holds several representations of ONE object (YCB ships textured.{obj,dae}
-# + nontextured.{ply,stl}), keep the best: textured-capable formats first, .obj first.
 _EXT_PRIORITY = (".obj", ".glb", ".gltf", ".dae", ".fbx", ".ply", ".stl", ".usd", ".usdc", ".usda")
-# Outward unit normals of the 4 side faces (mesh/world frame, Z-up).
 FACE_NORMALS = {"-Y": [0., -1, 0], "+Y": [0., 1, 0], "-X": [-1., 0, 0], "+X": [1., 0, 0]}
 
 
 def find_meshes(input_path: Path, one_per_dir: bool = True) -> list[Path]:
-    """Recursive mesh search, skipping our own usdz outputs. Mesh datasets organize one object per
-    leaf folder, often with several representations (YCB nests <obj>/google_16k/{textured.obj,
-    textured.dae, nontextured.ply, nontextured.stl}); `one_per_dir` keeps just the best of each
-    folder (a "textured" name and .obj win) and logs the drops. Set one_per_dir=False for a flat
-    folder of distinct meshes that share a directory."""
     found = [p for p in input_path.rglob("*")
              if p.suffix.lower() in MESH_EXTS and p.suffix.lower() != ".usdz"]
     if not one_per_dir:
@@ -57,17 +36,11 @@ def find_meshes(input_path: Path, one_per_dir: bool = True) -> list[Path]:
 
 
 def object_name(mesh: Path, input_path: Path) -> str:
-    """Human-meaningful object id. Nested datasets (YCB <id>/google_16k/textured.obj) name every
-    file `textured`, so the id is the TOP-LEVEL folder under input_path; flat folders use the stem."""
     rel = mesh.relative_to(input_path)
     return rel.parts[0] if len(rel.parts) > 1 else mesh.stem
 
 
 def write_camera_spec(out_json: Path):
-    """Per-face ortho camera ROTATIONS -- constant (bbox-independent), so computed once here in
-    the project env via vision_core's cv2opengl(look_at(...)) and handed to the Blender worker.
-    look_at(at=0, from=n): camera sits on the +normal side looking back at the object; cv2opengl
-    maps the +Z-forward (OpenCV) frame to Blender/OpenGL (-Z-forward), so tiles aren't mirrored."""
     faces = [{"name": k, "normal": n,
               "R": cv2opengl(look_at(np.zeros(3), np.array(n, float)))[:3, :3].tolist()}
              for k, n in FACE_NORMALS.items()]
@@ -76,7 +49,6 @@ def write_camera_spec(out_json: Path):
 
 
 def run_blender(mesh: Path, work: Path, cameras: Path) -> tuple[Path, dict, list[Path]]:
-    """Blender: mesh -> work/model.usdz + work/face_*.png + work/meta.json (bbox)."""
     work.mkdir(parents=True, exist_ok=True)
     usdz = work / "model.usdz"
     r = subprocess.run([BLENDER, "--background", "--python", str(MESH_BLENDER), "--",
@@ -88,9 +60,6 @@ def run_blender(mesh: Path, work: Path, cameras: Path) -> tuple[Path, dict, list
 
 
 def face_grasp_frames(bbox_min, bbox_max) -> dict[str, np.ndarray]:
-    """4 side-face grasp frames in mesh/world coords. Convention (user):
-    +X = outward face normal, +Z = world up, +Y = Z x X. Origin = measured bbox face center
-    (robust to where the mesh's local origin sits -- no origin==centroid assumption)."""
     lo, hi = np.asarray(bbox_min, float), np.asarray(bbox_max, float)
     c = (lo + hi) / 2.0
     up = np.array([0.0, 0.0, 1.0])
@@ -104,13 +73,12 @@ def face_grasp_frames(bbox_min, bbox_max) -> dict[str, np.ndarray]:
     for name, (n, origin) in faces.items():
         x = n / np.linalg.norm(n)
         z = up
-        y = np.cross(z, x)                         # |y| = 1 since z _|_ x for side faces
+        y = np.cross(z, x)
         out[name] = make_se3(origin, np.column_stack([x, y, z]))
     return out
 
 
 def write_grid(tiles: list[Path], faces: list[str], label: str, out_png: Path):
-    """Per-object 1x4 contact sheet (faces labeled) for offline review (relabel_classes UX)."""
     fig, axes = plt.subplots(1, len(tiles), figsize=(3.2 * len(tiles), 3.6))
     for ax, t, f in zip(np.atleast_1d(axes), tiles, faces):
         ax.imshow(PILImage.open(t)); ax.set_title(f); ax.axis("off")
@@ -118,12 +86,9 @@ def write_grid(tiles: list[Path], faces: list[str], label: str, out_png: Path):
 
 
 def convert(input_path, stage_path, names=None, classes=None):
-    """PHASE 1 (stage): render uniquely-labeled candidate face tiles + per-object candidate.json
-    (usdz, bbox, the 4 grasp SE3s, name/class) to <stage>/<label>/. Does NOT serialize the final
-    GraspableObject -- pick the winning face offline, then run finalize()."""
     input_path, stage_path = Path(input_path), Path(stage_path)
     stage_path.mkdir(parents=True, exist_ok=True)
-    cameras = write_camera_spec(stage_path / "cameras.json")   # constant; written once, reused
+    cameras = write_camera_spec(stage_path / "cameras.json")
     meshes = find_meshes(input_path)
     if names is not None or classes is not None:
         assert names is not None and classes is not None, "supply both names and classes"
@@ -131,7 +96,7 @@ def convert(input_path, stage_path, names=None, classes=None):
             f"need 1-1 name,class<->mesh: {len(names)}/{len(classes)} vs {len(meshes)} meshes"
     for idx, mesh in enumerate(meshes):
         name = names[idx] if names else object_name(mesh, input_path)
-        label = f"{idx:04d}_{name}"                   # unique + human-meaningful (YCB object id)
+        label = f"{idx:04d}_{name}"
         work = stage_path / label
         usdz, meta, tiles = run_blender(mesh, work, cameras)
         frames = face_grasp_frames(meta["bbox_min"], meta["bbox_max"])
@@ -150,13 +115,11 @@ def convert(input_path, stage_path, names=None, classes=None):
 
 
 def staged_labels(stage_path: Path) -> list[str]:
-    """Sorted object labels under the stage dir (each holds a candidate.json)."""
     return sorted(d.name for d in Path(stage_path).iterdir()
                   if d.is_dir() and (d / "candidate.json").exists())
 
 
 def open_grid(grid: Path):
-    """Best-effort pop the contact sheet in the OS image viewer (non-blocking; never fatal)."""
     try:
         subprocess.Popen(["xdg-open", str(grid)],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -165,11 +128,6 @@ def open_grid(grid: Path):
 
 
 def prompt_winners(stage_path, winners_path, show=True) -> dict:
-    """Interactively pick the winning face + class per staged object, saving winners_path after
-    every answer (so a long YCB session resumes if interrupted). For each object: open its grid.png,
-    then ask for the face (validated against that object's faces) and the class. Per-object commands:
-    blank = keep the saved choice, 's' = skip (leave undecided), 'q' = save and stop.
-    Returns the winners dict {label: {"face", "class"}}."""
     stage_path, winners_path = Path(stage_path), Path(winners_path)
     winners = yaml.safe_load(winners_path.read_text()) if winners_path.exists() else {}
     labels = staged_labels(stage_path)
@@ -211,10 +169,6 @@ def save_winners(winners, winners_path):
 
 
 def finalize(stage_path, output_path, winners=None, show=True):
-    """PHASE 2 (select): serialize the chosen reference tile + grasp frame as a GraspableObject
-    dataset at output_path. `winners` maps object label -> winning face name ("+X"), or ->
-    {"face": "+X", "class": "can"} to also set/override class. It may be a dict, a path to a
-    winners.yaml, or None to pick interactively (prompt_winners, saved to <stage>/winners.yaml)."""
     stage_path, output_path = Path(stage_path), Path(output_path)
     if winners is None:
         winners = prompt_winners(stage_path, stage_path / "winners.yaml", show=show)
@@ -237,9 +191,6 @@ def finalize(stage_path, output_path, winners=None, show=True):
 
 
 def ycb_download(output_path):
-    """Download YCB google_16k textured meshes; return the folder of extracted meshes.
-    Each object unpacks to <out>/ycb/<obj>/google_16k/{textured.obj,.mtl,texture_map.png}.
-    Objects lacking a google_16k variant 404 and are skipped (try/except)."""
     base = "https://ycb-benchmarks.s3.amazonaws.com/data"
     meshes_dir = Path(output_path) / "ycb"; meshes_dir.mkdir(parents=True, exist_ok=True)
     objects = json.loads(urllib.request.urlopen(f"{base}/objects.json").read())["objects"]
@@ -260,7 +211,7 @@ if __name__ == "__main__":
     p_y = sub.add_parser("ycb");      p_y.add_argument("download_dir")
     p_s = sub.add_parser("stage");    p_s.add_argument("input_dir"); p_s.add_argument("stage_dir")
     p_f = sub.add_parser("finalize"); p_f.add_argument("stage_dir"); p_f.add_argument("output_dir")
-    p_f.add_argument("winners", nargs="?", default=None,    # omit -> interactive face+class prompt
+    p_f.add_argument("winners", nargs="?", default=None,
                      help="winners.yaml; omit to pick interactively")
     p_f.add_argument("--no-open", action="store_true", help="don't auto-open each grid.png")
     a = ap.parse_args()

@@ -1,25 +1,3 @@
-"""Headless Blender renderer for the dry-run debug bundle (NO Isaac Sim deps).
-
-Consumes the bundle written by debug_export.export_debug_bundle:
-    <debug_dir>/scene.usdz     scene geometry + baked debug cameras + grasp-frame axes
-    <debug_dir>/dryrun.npz     planned poses + the dataset intrinsics (K, width, height)
-
-and writes two render modes (the export is unlit, so we add a sun + ambient world):
-
-    <debug_dir>/poses/pose_NNNN.png   one frame per planned pose, rendered from each
-                                      baked left-camera (the RGB the dataset uses), with
-                                      the dataset's intrinsics/resolution — a sanity check
-                                      that pose-planning aims the camera where we expect.
-    <debug_dir>/orbit/orbit_NNN.png   a turntable orbiting the scene centroid, to inspect
-                                      the geometry without opening Isaac.
-
-Run it through Blender (4.2 LTS), NOT a normal python interpreter:
-
-    blender --background --python blender_render.py -- <debug_dir> [--orbit-frames N]
-
-Args after the `--` separator are read via sys.argv[sys.argv.index('--')+1:], the
-same idiom the original build_object_dataset.py Blender script used.
-"""
 
 from __future__ import annotations
 
@@ -46,14 +24,11 @@ def parse_args():
     p.add_argument("--orbit-fps", type=int, default=12, help="orbit.gif playback fps")
     p.add_argument("--sun-energy", type=float, default=1.0)
     p.add_argument("--ambient", type=float, default=0.25, help="world background strength (1.0 washes out)")
-    # AgX has a long highlight latitude, so the near-white boxes need a big negative
-    # exposure before they stop glaring; -5 reads cleanly, go lower for richer color.
     p.add_argument("--exposure", type=float, default=-5.0, help="view-transform exposure stops (lower = darker)")
     return p.parse_args(_argv_after_dashes())
 
 
 def reset_and_import(usdz_path: Path):
-    """Blank scene + USD import (geometry AND the baked USD cameras)."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.wm.usd_import(filepath=str(usdz_path))
     scene = bpy.context.scene
@@ -63,10 +38,6 @@ def reset_and_import(usdz_path: Path):
 
 
 def add_lighting(scene, sun_energy: float, ambient: float, exposure: float):
-    """The USDZ exports unlit — add a sun + ambient world so anything shows up.
-
-    The near-white box cardboard blows out easily, so keep the sun/ambient modest
-    and pull the view-transform exposure down (a clean global stop control)."""
     sun = bpy.data.lights.new("DebugSun", 'SUN')
     sun.energy = sun_energy
     sun_obj = bpy.data.objects.new("DebugSun", sun)
@@ -80,11 +51,6 @@ def add_lighting(scene, sun_energy: float, ambient: float, exposure: float):
 
 
 def color_grasp_axes(emission: float = 2.5):
-    """Recolor the baked grasp-frame axis cylinders X=red / Y=green / Z=blue.
-
-    UsdShade bindings don't survive the usdz flatten, so we assign Blender
-    materials here by the cylinders' prim names (x/y/z, possibly with .NNN import
-    suffixes). Emission makes the thin axes readable against the bright boxes."""
     rgb = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0), "z": (0.0, 0.0, 1.0)}
     mats = {}
     for k, c in rgb.items():
@@ -98,7 +64,7 @@ def color_grasp_axes(emission: float = 2.5):
     n = 0
     for o in bpy.data.objects:
         if o.type == 'MESH':
-            key = o.name.split('.')[0]          # 'x', 'x.001', ...
+            key = o.name.split('.')[0]
             if key in mats:
                 o.data.materials.clear()
                 o.data.materials.append(mats[key])
@@ -107,8 +73,6 @@ def color_grasp_axes(emission: float = 2.5):
 
 
 def scene_bounds():
-    """World-space (centroid, bbox-diagonal-length) over imported MESH objects only
-    (excludes our camera/gizmo empties)."""
     meshes = [o for o in bpy.data.objects if o.type == 'MESH']
     corners = [o.matrix_world @ mathutils.Vector(c) for o in meshes for c in o.bound_box]
     if not corners:
@@ -119,11 +83,6 @@ def scene_bounds():
 
 
 def set_intrinsics(cam_data, K, width, height):
-    """Match a Blender camera to a 3x3 OpenCV K (fx,fy,cx,cy) at width x height.
-
-    sensor_fit=HORIZONTAL ties focal length to fx via the sensor width; aperture
-    offset (cx,cy) maps to lens shift, normalized by the larger sensor dimension
-    (= width here, since the fit is horizontal)."""
     fx, fy = float(K[0, 0]), float(K[1, 1])
     cx, cy = float(K[0, 2]), float(K[1, 2])
     cam_data.sensor_fit = 'HORIZONTAL'
@@ -133,7 +92,6 @@ def set_intrinsics(cam_data, K, width, height):
 
 
 def render_pose_sanity(scene, data, out_dir: Path):
-    """One render per baked debug camera (named cam_NNNN), with the dataset K/res."""
     W, H = int(data['width']), int(data['height'])
     scene.render.resolution_x, scene.render.resolution_y = W, H
     cams = sorted((o for o in bpy.data.objects
@@ -151,9 +109,6 @@ def render_pose_sanity(scene, data, out_dir: Path):
 
 
 def _frames_to_gif(frames_dir: Path, out_gif: Path, fps: int) -> bool:
-    """Assemble orbit_*.png into a single GIF. ffmpeg's gif encoder is built-in
-    (no GPL codec needed); two-stage palette in one filter graph for clean colors.
-    Falls back to imageio. Returns True on success."""
     pat = str(frames_dir / "orbit_*.png")
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg:
@@ -174,8 +129,6 @@ def _frames_to_gif(frames_dir: Path, out_gif: Path, fps: int) -> bool:
 
 
 def render_orbit(scene, centroid, radius, debug_dir: Path, n_frames: int, fps: int):
-    """Turntable -> a single orbit.gif. Frames render to a temp folder, get muxed
-    into the GIF, then the folder is removed (the GIF is the deliverable)."""
     frames_dir = debug_dir / "orbit_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     scene.render.resolution_x, scene.render.resolution_y = 1280, 720
@@ -190,7 +143,7 @@ def render_orbit(scene, centroid, radius, debug_dir: Path, n_frames: int, fps: i
         cam.location = centroid + mathutils.Vector(
             (dist * math.cos(th), dist * math.sin(th), dist * 0.45))
         direction = centroid - cam.location
-        cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()  # look_at centroid
+        cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
         scene.render.filepath = str(frames_dir / f"orbit_{i:03d}.png")
         bpy.ops.render.render(write_still=True)
 

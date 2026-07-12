@@ -1,19 +1,3 @@
-"""Phase-3 pass: label each phase-2 proposal inlier/outlier for verifier training.
-
-Runs AFTER ``add_proposals``. NN-free: for each frame it tags every proposer point
-True iff it lands ≥ ``--eps`` px inside its class's union mask (``cid_mask == cid`` —
-ANY same-class box counts, so a correct match onto a visually identical sibling box is
-not mislabeled an outlier; the border margin keeps grazing points out of the inlier
-set), then writes the result *residually* as
-``PreImageInlierSample.serialize(idx, dir, only={"labels"})`` — so ``obs/``,
-``cid_mask/``, and ``proposals/`` are never rewritten. After the loop it writes a
-per-render-dir ``ImageInlierMetadata`` with the aggregate inlier counts and the eps
-used. ``--eps`` is required (run_pipeline passes ``RuntimeConfig.inlier_border_eps``)
-so labels are never generated with an unintended margin. No skip-if-exists: re-running
-relabels every frame, atomically overwriting ``labels/`` and ``stats/``.
-
-Usage: isaac-datagen-inliers <render_dir> --eps E
-"""
 
 import argparse
 from pathlib import Path
@@ -33,7 +17,7 @@ def main():
     render_dir = args.render_dir
 
     md = ObsMaskDescriptorMetadata.deserialize(0, render_dir)
-    class_to_cid = {cls: cid for cid, cls in md.cid_to_class.items()}  # 1:1 by construction
+    class_to_cid = {cls: cid for cid, cls in md.cid_to_class.items()}
 
     n_frames = len(list((render_dir / "obs").iterdir()))
     n_inliers = n_total = 0
@@ -52,8 +36,6 @@ def main():
         n_total += n_tot
         print(f"[{idx + 1}/{n_frames}] {render_dir.name}: {n_in}/{n_tot} inliers, {len(labels)} class(es)")
 
-    # Per-render-dir stats catalog (written once, like ObsMaskDescriptorMetadata). Records the
-    # eps the labels were generated with — the labeling pass's provenance.
     ImageInlierMetadata(
         stats={"n_inliers": n_inliers, "n_total": n_total, "eps": args.eps},
     ).serialize(0, render_dir)

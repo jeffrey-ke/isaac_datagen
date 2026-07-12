@@ -1,30 +1,3 @@
-"""Run the full reference-seg datagen pipeline: render → proposals → inlier labels.
-
-Thin orchestrator: each phase runs as its OWN subprocess (Isaac Sim only releases
-the GPU when its process exits; the proposer then needs it), chained fail-fast.
-Phase 1 is skipped when the render dir already has obs/ frames — phases 2 and 3
-are individually resumable, but re-rendering under an existing proposals/ would
-silently desync them. Delete the render dir to force a fresh render.
-
-After phase 1, every run validates cid/iid mask consistency (graspable iids on
-each frame must map to a class cid in cid_mask). On failure the pipeline exits
-before proposals/inliers.
-
-After a FRESH render, on an interactive terminal the pipeline prints a
-foreground-luminance / dark-frame summary (via isaac-datagen-measure-luminance)
-and pauses for a y/N confirmation, so you can catch junk (e.g. the intermittent
-all-black renders) before the downstream phases spend compute on them; answer N
-to abort (render dir kept). Non-interactive runs (CI/cron/pipes) skip the prompt
-and continue.
-
-Multi-GPU phase 2: ``proposer_devices=[cuda:0,cuda:1]`` fans out one proposals
-subprocess per device, splitting the frame window contiguously. Phase 3 labels
-ALL frames, so a manually windowed run (start_frame/end_frame without full
-coverage) will fail phase 3 on the missing proposals — the window fields are
-for sharding, not subsetting.
-
-Usage: isaac-datagen-pipeline <config.yaml> [key=value ...]
-"""
 
 import argparse
 import shutil
@@ -55,15 +28,8 @@ def _run(script: str, *args: str) -> None:
 
 
 def _confirm_or_abort(render_dir: Path, n_obs: int) -> None:
-    """Pause after a fresh render so the user can eyeball the frames before the
-    pipeline spends compute on the downstream (no-Isaac) phases — useful given the
-    intermittent all-black-render bug. Only prompts on an interactive terminal;
-    non-interactive runs (CI/cron/pipes) continue uninterrupted.
-    """
     if not sys.stdin.isatty():
         return
-    # Auto-print the foreground-luminance / dark-frame catalog so obvious junk
-    # (the intermittent all-black renders) shows up without opening images.
     exe = shutil.which("isaac-datagen-measure-luminance", path=str(Path(sys.executable).parent)) \
         or shutil.which("isaac-datagen-measure-luminance")
     if exe:
@@ -92,7 +58,6 @@ def _run_proposals_sharded(devices, n_obs: int, runtime) -> None:
                       f"proposer_device={dev}"]
         print(f"  shard {k}: frames [{bounds[k]}, {bounds[k + 1]}) on {dev}", flush=True)
         procs.append((k, dev, subprocess.Popen([exe, *shard_args])))
-    # Wait for ALL shards even if one fails — the survivors' work is resumable.
     failed = [(k, dev, rc) for k, dev, p in procs if (rc := p.wait()) != 0]
     if failed:
         sys.exit("; ".join(f"shard {k} ({dev}) exited {rc}" for k, dev, rc in failed)
@@ -137,7 +102,7 @@ def main():
                  "run isaac-datagen-validate-obsmask for the full list")
 
     if fresh:
-        _confirm_or_abort(render_dir, n_obs)   # gate: inspect fresh render before downstream phases
+        _confirm_or_abort(render_dir, n_obs)
 
     devices = runtime.proposer_devices or ()
     if len(devices) > 1:

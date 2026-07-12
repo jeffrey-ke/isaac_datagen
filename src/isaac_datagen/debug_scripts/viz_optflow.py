@@ -1,11 +1,3 @@
-"""Render OptFlowSample.visualize(md) for the frames in an optflow render dir.
-
-Deserializes the render dir's OptFlowMetadata once (idx 0) and every per-frame
-OptFlowSample, then emits one labeled [ref | obs] correspondence PNG per frame
-(GT reference→observation warp via RoMa's get_gt_warp, the trainer's warp).
-
-    uv run debug_scripts/viz_optflow.py <render_dir> [--idx N] [--cls CLASS] [--out DIR] [--dpi N]
-"""
 from __future__ import annotations
 
 import argparse
@@ -26,14 +18,14 @@ def main():
     p.add_argument("--dpi", type=int, default=100)
     args = p.parse_args()
 
-    matplotlib.rcParams["figure.dpi"] = args.dpi  # visualize() rasterizes at figure dpi
+    matplotlib.rcParams["figure.dpi"] = args.dpi
 
     md = OptFlowMetadata.deserialize(0, args.render_dir)
     print(f"classes: {list(md.class_to_name)}")
     for cls, names in md.class_to_name.items():
         print(f"  {cls}: {len(names)} instances {names}")
 
-    n = len(sorted((args.render_dir / "obs").glob("obs_*.png")))   # ObsMask.obs, nested flat in OptFlowSample
+    n = len(sorted((args.render_dir / "obs").glob("obs_*.png")))
     idxs = [args.idx] if args.idx is not None else range(n)
 
     out_dir = args.out or args.render_dir / "viz"

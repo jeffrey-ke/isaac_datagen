@@ -1,11 +1,3 @@
-"""Grasp-frame policy registry (posers.py / placers.py get(name) idiom).
-
-policy(**args)(lo, hi, cls) -> (4, 4) SE3 grasp frame in OBJECT-LOCAL (usdz) frame,
-+X = outward face normal, +Z = up (mesh_convert.face_grasp_frames convention).
-Policies MUST return side faces only: ref_pose_from_grasp's look_at(up=[0,0,1])
-is singular for ±Z normals — fail loud, never fall back.
-Selected by an explicit config key (StoreSceneSpec.grasp_frame_policy); no defaults.
-"""
 from __future__ import annotations
 
 import sys
@@ -23,8 +15,6 @@ def get(name: str):
 
 
 class FixedFaceGrasp:
-    """Fixed-local-face policy: the grasp frame of one named side face of the
-    local bbox, via mesh_convert.face_grasp_frames. face ∈ {-Y, +Y, -X, +X}."""
 
     def __init__(self, face: str):
         assert face in FACE_NORMALS, \
@@ -32,14 +22,10 @@ class FixedFaceGrasp:
         self.face = face
 
     def __call__(self, lo: np.ndarray, hi: np.ndarray, cls: str) -> np.ndarray:
-        return face_grasp_frames(lo, hi)[self.face]      # cls ignored: one fixed face for all
+        return face_grasp_frames(lo, hi)[self.face]
 
 
 class PerClassFaceGrasp:
-    """Per-SKU-class front-face policy: the grasp frame of each class's hand-curated
-    aisle-facing side face (from the store front-face check). faces = {class: face},
-    face in FACE_NORMALS. Fail-loud on a class not in the table — never guess a face;
-    the caller must only pass classes it covers (product_patterns must match the keys)."""
     def __init__(self, faces: dict):
         assert faces, "PerClassFaceGrasp needs a non-empty {class: face} table"
         bad = {c: f for c, f in faces.items() if f not in FACE_NORMALS}

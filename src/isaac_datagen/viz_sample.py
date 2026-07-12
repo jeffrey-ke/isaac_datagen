@@ -1,22 +1,3 @@
-"""Per-sample viz for PreImageInlierSample — per-class proposals and gt masks.
-
-Convenience compositions of ``vision_core.viz`` primitives (same parts as
-viz_inliers, different composition). An PreImageInlierSample maps class name →
-proposals and class name → labels; for each selected frame, one figure:
-
-  panels 0..N-1   — per class: obs with THAT class's proposals scattered,
-                    color-coded by its labels (green = inlier / red = outlier),
-                    with the class's canonical reference image as a thumbnail
-                    in the corner.
-  panels N..2N-1  — per class: obs with its gt union mask (``cid_mask == cid``)
-                    alpha-blended, color-matched to its proposals panel title.
-
-Usage:
-    isaac-datagen-viz-sample <render_dir> [--out DIR] [--frames 0,5,10 |
-        --max-frames K --stride S] [--cols 4] [--dpi 200] [--max-points N]
-        [--alpha 0.45]
-Requires phase-3 output (``labels/``); run ``isaac-datagen-inliers`` first.
-"""
 
 import argparse
 import sys
@@ -31,11 +12,8 @@ from vision_core.viz import (add_thumbnail, assign_colors, overlay_id_masks, pan
 from isaac_datagen.viz_inliers import select_frames
 
 
-# ── Convenience panels — thin calling sequences over vision_core.viz ────────────
 
 def class_proposals_panel(ax, obs_rgb, coords, labels, ref_rgba, cls, color, max_points=None):
-    """obs + one class's proposals (green = inlier / red = outlier from its
-    labels) + that class's reference image as a corner thumbnail."""
     ax.imshow(obs_rgb)
     note = scatter_labeled(ax, coords, labels, max_points)
     ax.set_title(f"{cls}  in={int(labels.sum())}/{len(labels)}{note}", fontsize=8, color=color)
@@ -44,20 +22,14 @@ def class_proposals_panel(ax, obs_rgb, coords, labels, ref_rgba, cls, color, max
 
 
 def class_mask_panel(ax, obs_rgb, cid_mask_np, cid, cls, color, alpha=0.45):
-    """obs + one class's gt union mask (``cid_mask == cid``) alpha-blended."""
     ax.imshow(overlay_id_masks(obs_rgb, cid_mask_np, {cid: color}, alpha))
     ax.set_title(f"{cls}  gt mask", fontsize=8, color=color)
     ax.axis("off")
 
 
 def sample_figure(sample, md, *, cols=4, max_points=None, alpha=0.45, title=None):
-    """PreImageInlierSample → Figure: one proposals panel (with ref thumbnail) per
-    class in ``sample.proposals``, then one gt union-mask panel per class.
-    Returns None if the sample has no proposals."""
     obs_rgb = rgba_chw_to_rgb(sample.obs)
     cidm = sample.cid_mask.numpy()
-    # driven by the proposals dict — a class can be present in cid_mask yet
-    # have no proposals (e.g. skipped by the proposer pass)
     classes = sorted(sample.proposals)
     if not classes:
         return None
@@ -81,7 +53,6 @@ def sample_figure(sample, md, *, cols=4, max_points=None, alpha=0.45, title=None
     return fig
 
 
-# ── Entry point ─────────────────────────────────────────────────────────────────
 
 def main():
     p = argparse.ArgumentParser(description="Per-class proposals/gt-masks viz for PreImageInlierSample.")

@@ -1,7 +1,3 @@
-"""Shared `--help` epilog for the pipeline's front-door commands (isaac-datagen,
-isaac-datagen-pipeline). Hand-maintained: mirrors pyproject.toml's [project.scripts]
-comments and a scan of src/isaac_datagen/configs/*.yaml — update both when either drifts.
-"""
 
 _PHASES = """\
 PHASES

@@ -1,7 +1,3 @@
-"""GraspableObject filter registry: {name, args} specs select filters from this
-module (same idiom as posers.py), applied in order. Import-light so runtime_config
-can import FilterSpec without pulling in isaacsim.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -19,8 +15,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class FilterSpec:
-    name: str                                 # filter class name in this module
-    args: dict = field(default_factory=dict)  # splatted into that class's ctor
+    name: str
+    args: dict = field(default_factory=dict)
 
 
 def make_filters(specs: list[FilterSpec]) -> list:
@@ -29,12 +25,6 @@ def make_filters(specs: list[FilterSpec]) -> list:
 
 def filter_objects(objects: list[GraspableObject],
                    specs: list[FilterSpec]) -> list[GraspableObject]:
-    """Apply each filter in order; raise if the candidate set is ever empty.
-
-    The collect_* loaders guard name-uniqueness on load, but filters run after them and
-    may mint new objects (ReplicateFilter), so re-assert globally-unique meta["name"] on
-    the final set: it is the placed prim-path component (add_object) and the writer catalog
-    join key, both silently last-wins on a clash."""
     for f in make_filters(specs):
         if not objects:
             raise ValueError(f"no GraspableObjects left to feed filter {f!r}")
@@ -48,7 +38,6 @@ def filter_objects(objects: list[GraspableObject],
 
 
 class ShuffleFilter:
-    """Deterministic permutation; seed is mandatory."""
 
     def __init__(self, seed: int):
         self.seed = seed
@@ -79,11 +68,6 @@ class ReplicateFilter:
 
 
 class MetaFilter:
-    """Cap how many objects matching a meta-field glob survive: walk `objects` in order
-    and keep at most `max` whose meta[key] fnmatches the Unix find-style glob `value`
-    (e.g. key='name', value='amazon_*'), dropping the overflow among matches. Objects
-    that don't match pass through untouched.
-    """
 
     def __init__(self, key: str, value: str, max: int):
         self.key = key
@@ -103,11 +87,6 @@ class MetaFilter:
 
 
 class RegexFilter:
-    """Keep only objects whose meta[key] matches the regex `value` (via re.search),
-    dropping every non-match. Unlike MetaFilter (a glob quota that passes non-matches
-    through), this is an inclusion filter and supports alternation, e.g.
-    key='class', value='cheezit|mustard|amazon_.*'.
-    """
 
     def __init__(self, key: str, value: str):
         self.key = key

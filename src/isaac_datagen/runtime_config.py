@@ -1,12 +1,3 @@
-"""RuntimeConfig schema + YAML/dotlist loader.
-
-Single source of truth for datagen configuration. Downstream code
-(build_scene, make_replicator) depends only on RuntimeConfig.
-
-Computed fields surface in YAML as ${call:<fn_name>[,arg,...]}. The
-referenced function must exist at module level; typos raise AttributeError
-at load time.
-"""
 
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -22,9 +13,6 @@ from isaac_datagen.filters import FilterSpec
 
 @dataclass
 class LightJitterSpec:
-    """Per-frame intensity jitter of EXISTING scene lights matched by prim-name
-    pattern under `root` (store mode: the store's own lights). Scale factors, not
-    absolute intensities — preserves the scene's authored light balance."""
     root: str
     pattern: str
     intensity_scale_range: tuple[float, float]
@@ -34,7 +22,7 @@ class LightJitterSpec:
 class RuntimeConfig:
     idx: int
     mode: str
-    num_targets: int | None  # int => sample N grasp targets; null => every scene grasp frame ONCE (still required in yaml)
+    num_targets: int | None
     scene: str
     dataset_dir: str
     intrinsics_path: str
@@ -46,16 +34,11 @@ class RuntimeConfig:
     proposer_config_path: str
     descriptor_config_path: str
 
-    # Object-placement policy: a class name from the placers.py registry, e.g.
-    # "UntilExhaustedStacker". Its ctor kwargs come from placement_args (below).
-    # Required (no default) so a config can't silently get the wrong policy.
     placement: str
     dome_light: bool
 
     dry_run: bool
 
-    # Phase-3 inliers: a proposal counts as an inlier only if it lies ≥ this many px
-    # inside its class union mask (border margin; see vision_core.mask_utils.coords_in_mask).
     inlier_border_eps: float
 
     num_frames: int | None = None
@@ -66,40 +49,18 @@ class RuntimeConfig:
     width: int = 1920
     height: int = 1080
 
-    # Dry run (dotlist: dry_run=true): build the scene and plan poses exactly as the
-    # real run, then export scene.usdz + baked debug cameras/grasp-axes and the planned
-    # poses for offline (Blender) inspection — skipping the writer and RTX capture.
 
-    # Phase-2 proposer gate (reprojection-coverage): a class is proposed iff ANY of its member
-    # instances has more than this fraction of its reference texture visible in the observation —
-    # the reference RGB-D back-projected through the instance's class_to_l2w placement into the obs
-    # camera, fraction not occluded/out-of-frame. Robust to camera distance (denominator is reference
-    # points, not obs pixels). See isaac_datagen.proposal_gate.gate_classes_reproj.
     proposer_min_visible_ratio: float = 0.30
-    proposer_tau_d: float = 0.001   # reprojection_occlusion absolute depth tolerance (m)
-    proposer_tau_r: float = 0.005   # reprojection_occlusion relative depth tolerance
-    proposer_min_visible_px: int = 60000  # DEPRECATED, ignored by the reproj gate (back-compat loading)
-    proposer_max_occlusion: float = 1.0   # DEPRECATED, ignored by the gate (kept for back-compat loading)
+    proposer_tau_d: float = 0.001
+    proposer_tau_r: float = 0.005
+    proposer_min_visible_px: int = 60000
+    proposer_max_occlusion: float = 1.0
 
-    # Phase-2 frame window (contiguous sharding): process frames
-    # [start_frame, end_frame); end_frame=None → through the last frame.
     start_frame: int = 0
     end_frame: int | None = None
 
-    # run_pipeline only: >1 device → one phase-2 subprocess per device, splitting
-    # the frame window contiguously. None/1 device → single proposer run.
     proposer_devices: tuple[str, ...] | None = None
 
-    # RTX render cost / VRAM tuning (consumed by boot_sim). Defaults preserve the
-    # prior hardcoded behavior; lower these to trade render quality/speed for VRAM.
-    #
-    #   field                    | default | effect
-    #   -------------------------|---------|------------------------------------------------
-    #   path_tracing_spp         | 256     | samples/pixel; lower = noisier, less mem, faster
-    #   path_tracing_max_bounces | 12      | light bounces; lower = less memory/time
-    #   enable_texture_streaming | False   | True = stream textures on demand (less VRAM)
-    #   texture_streaming_budget | 0.6     | VRAM fraction cap for streaming (when enabled)
-    #   debug_material_type      | -1      | 0 disables materials (flat output, big savings); -1 = normal
     path_tracing_spp: int = 256
     path_tracing_max_bounces: int = 12
     enable_texture_streaming: bool = False
@@ -110,127 +71,53 @@ class RuntimeConfig:
     zrange: tuple[float, float] = (0.01, 0.01)
     target_to_baseline_ypr_desired: tuple[float, float, float] = (90, 0, 90)
 
-    # Object-placement policy registry (placers.py): name a placer class in
-    # `placement`, pass its ctor kwargs here verbatim (mirrors pose_generation_policy
-    # / segmentation OptimConfig). e.g. {"max_column_height": 5, "epsilon": 0.002} for
-    # UntilExhaustedStacker (jagged column heights); ShelfPlacer takes a fixed "column_height".
     placement_args: dict = field(default_factory=dict)
-    # Legacy OccupancyGrid grid dims (i,j,k); no longer used by the live placement path
-    # (placers.py retired OccupancyGrid), still read by debug_scripts. Optional.
     pallet_dims: tuple[int, int, int] | None = None
 
-    # Pose-generation policy registry (posers.py): name a poser class, pass its
-    # ctor kwargs verbatim. Mirrors segmentation OptimConfig (name + args).
     pose_generation_policy: str = "GridFixedPoser"
     pose_generation_policy_args: dict = field(default_factory=dict)
 
     occluders_per_target: int = 0
     occluder_pose_policy: str = "GridFixedPoser"
     occluder_pose_policy_args: dict = field(default_factory=dict)
-    occluder_scale: float | None = None        # fixed cube scale; None → random uniform(0.04, 0.2)
+    occluder_scale: float | None = None
 
     filter_specs: list[FilterSpec] = field(default_factory=list)
 
     texture_paths: tuple[str, ...] = ()
     background_textures: tuple[str, ...] = ()
 
-    # ── Lighting: DistantLight key + DomeLight fill ──────────────────────────
-    # DistantLight is the main source: parallel rays → uniform wall irradiance
-    # (no inverse-square dark-wall falloff) and crisp directional shadows for the
-    # occluders. It is AIMED at the grasp-target centroid via look_at+cv2opengl
-    # (see build_scene), not hand-rotated. distant_light_offset is the "sun"
-    # position relative to that centroid — DIRECTION ONLY matters (distant light),
-    # default front-top into the -Y camera-facing faces. Dome is a low ambient
-    # fill so shadowed faces don't crush. TUNE distant_intensity (and/or
-    # exposure_time) on the first render to land fg_mean ~120-180; keep
-    # dome_fill_intensity ~10-20% of the key.
     distant_light: bool = True
     distant_intensity: float = 3000.0
-    distant_angle: float = 0.53                        # angular diameter (deg); raise → softer penumbra
-    distant_light_offset: tuple[float, float, float] = (1.0, -3.0, 3.0)  # sun pos rel. to centroid; dir only
+    distant_angle: float = 0.53
+    distant_light_offset: tuple[float, float, float] = (1.0, -3.0, 3.0)
     dome_fill_intensity: float = 200.0
 
-    # ── Per-frame key-light jitter ───────────────────────────────────────────
-    # Re-lights the wall every captured frame so faces don't render uniformly.
-    # Direction jitters the "sun" position (eye = centroid + distant_light_offset)
-    # in the grasp-centroid frame: perturb the offset by U(-j, j) per axis and
-    # re-aim via look_at_euler, so the wall stays front-keyed and per-face shading
-    # + shadow direction change. All channels apply as direct USD writes from
-    # the capture step loop with fully precomputed seeded schedules (exact
-    # applied values land in lighting_log.json) — Replicator-graph modifies on
-    # build_scene lights never execute; see
-    # .docs_claude/lighting-jitter-mechanism.md. None/0 disables that channel.
     jitter_distant: bool = False
-    distant_offset_jitter: float = 0.75         # per-axis half-width (m) of the sun-offset jitter; 0 → fixed dir
-    distant_intensity_jitter: tuple[float, float] | None = None    # per-frame uniform range; None → static
-    distant_temperature_jitter: tuple[float, float] | None = None  # per-frame Kelvin range; None → default white
+    distant_offset_jitter: float = 0.75
+    distant_intensity_jitter: tuple[float, float] | None = None
+    distant_temperature_jitter: tuple[float, float] | None = None
 
-    # ── Lighting diagnostics (dark-box investigation) ────────────────────────
-    # SUPERSEDED: the live recipe is the distant-key + dome-fill block above, not
-    # dome-only. These fields remain for the seeded dome-intensity diagnostic path
-    # only (jitter_dome=False by default → unused while the key light is static).
-    # Historical note (render848): a FIXED, non-normalized dome at intensity 1000 under
-    # exposure_time=1.0 → fg_mean ~178 was the validated dome-only config. dome_normalize=True
-    # divides intensity by ~4π solid angle → starves the dome into the ACES toe (dark wall);
-    # keep it False. dome_intensity_range only feeds the (off) jitter path. The dome is now a
-    # low fill (dome_fill_intensity), not the main light.
     jitter_dome: bool = False
     dome_intensity_range: tuple[float, float] = (500.0, 1000.0)
     dome_normalize: bool = False
-    log_lighting: bool = True                 # write <render_dir>/lighting_log.json
+    log_lighting: bool = True
 
-    # ── RTX exposure (dark-box fix) ──────────────────────────────────────────
-    # The captured `rgb` AOV is post-tonemap LDR (ACES, /rtx/post/tonemap/op=6).
-    # Auto-exposure is off, so exposure is fixed by the photographic triangle
-    # below. The shipped carb default exposureTime=0.02s (a daylight shutter,
-    # ~EV100 10) underexposed our dome-lit scene into the ACES toe → the box wall
-    # quantized to exactly 0 until radiance cleared the toe, then snapped white
-    # (the dark-box cliff). A longer shutter pulls the wall into the midtones;
-    # lower f_number / higher film_iso also brighten. set_exposure=False leaves
-    # the RTX defaults untouched.
     set_exposure: bool = True
-    exposure_time: float = 1.0                # shutter seconds; 0.02 (old default) → 1.0 ≈ +5.6 stops
-    f_number: float = 5.0                     # aperture f-stop; lower = brighter (∝ 1/f_number²)
-    film_iso: float = 100.0                   # sensor ISO; higher = brighter (∝ iso/100)
+    exposure_time: float = 1.0
+    f_number: float = 5.0
+    film_iso: float = 100.0
 
-    # Subframes accumulated per captured frame — the documented "materials not
-    # loaded in time" / denoise knob (≥2 per Isaac 5.1 Replicator troubleshooting).
-    # NOTE: this did NOT fix the intermittent all-black render; that is a
-    # per-process renderer-init coin flip decided before the first frame, not a
-    # per-frame settle issue. See .docs_claude/plans/active/render-darkness-investigation.md.
     rt_subframes: int = 20
 
-    # app.update() frames to settle RTX before capture: lets MDL shaders compile, the dome
-    # HDRI/textures stream in, and PT/denoiser state initialize, so frame 0 isn't a black
-    # coin flip. This targets the per-process renderer-init flip rt_subframes did NOT fix
-    # (see note above). Mirrors Isaac's camera-sensor warmup (isaacsim.sensors.camera tests:
-    # N x app.update() before reading pixels). 0 disables.
     warmup_frames: int = 32
 
-    # Inspection toggle: True → obs RGBA is fully opaque (alpha=255 everywhere) instead of
-    # cropped to graspable-instance pixels (composite_rgba). Lets you view the whole frame —
-    # shadows / background / occluders included. OFF by default; iid_mask still carries the true
-    # foreground, so the dataset contract is intact.
     obs_full_alpha: bool = False
 
-    # ── Optical-flow dataset (Plan 2) ────────────────────────────────────────
-    # mode selects the orchestrator in clean_datagen.main():
-    #   "reference_segmentation" (default, ObsMask dataset) or "optflow" (OptFlow dataset).
-    # Object dataset dir(s) the active orchestrator places + captures. `mode` already
-    # selects the collector that interprets these (collect_objects for
-    # reference_segmentation, collect_preoptflow for optflow), so one field suffices
-    # and is required for both modes.
     objects_path: list[str] = field(default_factory=list)
 
-    # ── Scene-builder registry (scene_builders.py) ───────────────────────────
-    # Named builder(runtime, objects) -> SceneHandle. Default names the composed
-    # incumbent (same precedent as pose_generation_policy = "GridFixedPoser");
-    # store mode: scene_builder: build_store_scene + scene_builder_args validated
-    # fail-loud by store_scene.StoreSceneSpec (store_usd exists, patterns
-    # non-empty, grasp_frame_policy resolves — no default guessing).
     scene_builder: str = "build_scene"
     scene_builder_args: dict = field(default_factory=dict)
-    # Existing-light jitter registrations, applied in make_replicator.
     light_jitter_patterns: list[LightJitterSpec] = field(default_factory=list)
 
     def __post_init__(self):
@@ -274,8 +161,6 @@ class RuntimeConfig:
 
     @property
     def effective_seed(self) -> int:
-        """Per-render seed: base seed offset by render idx, so each render dir is
-        distinct yet reproducible (re-render same idx → identical scene)."""
         return self.seed + self.idx
 
 

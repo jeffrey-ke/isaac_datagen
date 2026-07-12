@@ -1,12 +1,3 @@
-"""Dump OptFlowObject.visualize() QA panels for an OptFlowObject (preoptflow) dataset.
-
-For each object: reference RGB | colormapped reference depth | 3D ref-pose (object mesh in its
-local-frame position + wireframe camera + frame gizmo), captioned with all meta fields.
-
-The 3D mesh reads the .usdz via pxr, so run under the usd-core overlay:
-
-    uv run --with usd-core debug_scripts/viz_optflow_objects.py <preoptflow_dataset> [--idx N] [--out DIR]
-"""
 from __future__ import annotations
 
 import argparse

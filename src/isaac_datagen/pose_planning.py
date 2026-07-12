@@ -1,4 +1,3 @@
-"""Target-frame pose sampling. Pure numpy, no Isaac Sim deps."""
 
 from __future__ import annotations
 

@@ -1,20 +1,3 @@
-"""Render the proposer's per-frame gate decision for every frame in a dataset (no matcher, pure disk).
-
-The gate (``proposal_gate.gate_classes_reproj``) admits a class iff ANY of its member instances has more
-than ``--min-visible-ratio`` of its reference texture visible in the observation — the class's reference
-RGB-D reprojected through that instance's ``class_to_l2w`` placement, fraction not occluded/off-frame.
-This tool makes that visible: per frame it outlines every present instance over the observation — GREEN
-if that instance clears the ratio, RED if not — and a class is proposed iff ≥1 of its instances is green.
-Each instance is labelled with its visibility ratio; the title lists the resulting gated-class set. Use
-it to eyeball the cut before regenerating proposals.
-
-Needs an OptFlow dataset (per-frame ``observation_depth``/``cam2world`` + per-instance ``class_to_l2w``).
-One PNG per frame → ``<out-root>/<dataset>/<render>/f####.png`` (default out-root is a gitignored
-``gate_viz/`` at the meta-repo root). Run from a sibling env with torch + vision_core (vision_core's own
-env has no torchvision):
-
-    isaac-datagen-viz-gate <dataset_root|render_dir> [...] [--min-visible-ratio 0.30] [--out-root DIR] [--limit N]
-"""
 
 from __future__ import annotations
 
@@ -23,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")  # headless
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
@@ -37,10 +20,6 @@ DEFAULT_OUT_ROOT = Path("/home/jeffk/repo/refseg-workspace/gate_viz")
 
 def _render_frame(sample, md, vis: dict[int, float], min_visible_ratio: float,
                   title: str, out_path: Path) -> None:
-    """One frame: instance outlines colored by the gate (green=passes ratio, red=dropped).
-
-    ``vis`` maps iid -> reference-texture visibility ratio (``proposal_gate.instance_visibility``);
-    an iid absent from ``vis`` has no reference/placement to score and is drawn grey as ``n/a``."""
     om = sample.obsmask
     iid_mask = om.iid_mask.numpy()
     mm = md.obsmaskmeta
@@ -67,7 +46,6 @@ def _render_frame(sample, md, vis: dict[int, float], min_visible_ratio: float,
 
 
 def viz_render_dir(render_dir: Path, out_root: Path, min_visible_ratio: float, limit: int | None = None) -> int:
-    """Write one gate-decision PNG per frame into <out_root>/<dataset>/<render>/. Returns count."""
     render_dir = Path(render_dir)
     dataset = render_dir.parent.name
     out_dir = out_root / dataset / render_dir.name
@@ -75,15 +53,15 @@ def viz_render_dir(render_dir: Path, out_root: Path, min_visible_ratio: float, l
     md = OptFlowMetadata.deserialize(0, render_dir)
     mm = md.obsmaskmeta
     iid_to_name = {int(k): v for k, v in mm.iid_to_name.items()}
-    ref_cache: dict = {}   # class -> dense reference points, computed once across frames
+    ref_cache: dict = {}
 
     n = count_samples(render_dir)
     n = n if limit is None else min(limit, n)
     for idx in tqdm(range(n), desc=f"{dataset}/{render_dir.name}", unit="frame", leave=False):
         sample = OptFlowSample.deserialize(idx, render_dir)
-        vis = instance_visibility(sample, md, ref_cache=ref_cache)   # iid -> visible ratio
+        vis = instance_visibility(sample, md, ref_cache=ref_cache)
         gated = sorted({mm.name_to_class[iid_to_name[iid]]
-                        for iid, r in vis.items() if r > min_visible_ratio})  # for the title
+                        for iid, r in vis.items() if r > min_visible_ratio})
         title = (f"{dataset}/{render_dir.name}  f{idx:04d}   gate: >{min_visible_ratio:.0%} ref-texture "
                  f"visible (green=passes, red=dropped)\ngated classes ({len(gated)}): {', '.join(gated) or '—'}")
         _render_frame(sample, md, vis, min_visible_ratio, title, out_dir / f"f{idx:04d}.png")
@@ -91,7 +69,6 @@ def viz_render_dir(render_dir: Path, out_root: Path, min_visible_ratio: float, l
 
 
 def _resolve(root: Path, out_root: Path, min_visible_ratio: float, limit: int | None) -> int:
-    """A render dir (has obs/) → render it; else a dataset root → walk its render dirs."""
     if (root / "obs").is_dir():
         return viz_render_dir(root, out_root, min_visible_ratio, limit)
     from vision_core.migrate import for_each_render_dir

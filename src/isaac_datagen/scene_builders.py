@@ -1,11 +1,7 @@
-"""Scene-builder registry (posers/placers/filters idiom).
-
-runtime.scene_builder names an entry; builder(runtime, objects) -> SceneHandle.
-"""
 import sys
 
-from isaac_datagen.scene import build_scene                  # composed incumbent
-from isaac_datagen.store_scene import build_store_scene      # store variant
+from isaac_datagen.scene import build_scene
+from isaac_datagen.store_scene import build_store_scene
 
 
 def get(name: str):

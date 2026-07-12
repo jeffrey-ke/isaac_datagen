@@ -1,16 +1,3 @@
-"""Show the OccupancyGrid state + which boxes are graspable (no Isaac Sim needed).
-
-Reconstructs exactly what create_stack_of_objects() does for the
-reference_segmentation run, then prints:
-  - a side-view of the grid (real object / phantom-occupied / graspable),
-  - a per-placed-box table of is_front / is_top / is_graspable,
-  - the rule definitions and why only one box qualifies.
-
-The graspability logic is pure numpy, so this runs instantly without booting
-the sim. Run from src/isaac_datagen/:
-
-    uv run debug_occupancy.py configs/randomized.yaml
-"""
 
 from __future__ import annotations
 
@@ -29,18 +16,15 @@ def main():
     dims = tuple(cfg["pallet_dims"])
     gpath = cfg["objects_path"]
 
-    # Mirror clean_datagen.reference_segmentation: objects = collect_objects(...)
     metas = sorted(glob.glob(os.path.join(gpath, "meta", "meta_*.yaml")))
     names = [yaml.safe_load(open(m)).get("name", "?") for m in metas]
 
-    # Full-wall policy: the stack takes the first `capacity` objects.
     capacity = int(np.prod(dims))
     sliced_names = names[:capacity]
     n = len(sliced_names)
-    # bbox dims are irrelevant to graspability (they only set slot translation).
     grid = OccupancyGrid(dims, (1.0, 1.0, 1.0))
-    seq = grid.sequence                      # nonzero order: k fastest, then j, then i
-    placed = seq[:min(n, capacity)]          # objects fill the FIRST n sequence slots
+    seq = grid.sequence
+    placed = seq[:min(n, capacity)]
     placed_coord_to_name = dict(zip(placed, sliced_names))
     graspable = [c for c in placed if grid.is_front(*c) and grid.is_top(*c)]
     graspable_set = set(graspable)
@@ -51,7 +35,6 @@ def main():
     print(f"objects placed = {n}  (objects[4:11]); grid is initialized FULL: np.ones({dims})")
     print(f"=> grid claims all {capacity} slots occupied, but only {n} have a real box.\n")
 
-    # Side view per depth layer j: rows k (top->bottom), cols i (0..gx-1).
     legend = "  G = graspable real box   # = real box (not graspable)   . = phantom (grid=1, no box)"
     for j in range(gy):
         print(f"side view (depth j={j}):   columns i=0..{gx-1} left->right, rows k top->bottom")
@@ -70,7 +53,6 @@ def main():
             print(f"  k={k}  " + " ".join(cells))
         print(legend + "\n")
 
-    # Per-placed-box graspability table.
     print("placed boxes (in placement order = sequence order):")
     print(f"  {'coord (i,j,k)':<14} {'name':<12} {'is_front':<9} {'is_top':<7} graspable")
     for c in placed:

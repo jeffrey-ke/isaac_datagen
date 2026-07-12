@@ -1,12 +1,3 @@
-"""Re-render ONE GraspableObject to verify the centroid-aligned ref pose + visualize().
-
-Boots Isaac once, renders a single object via the production ``render_one`` (so it exercises the
-now-centroid-aligned ``ref_pose_from_grasp``), wraps it as an OptFlowObject, and dumps the
-``visualize()`` QA panel. Default object: amazon_32 (idx 33 of combined_dataset), the worst
-top-crop case.
-
-    uv run debug_scripts/verify_centroid_ref.py <config.yaml> <graspable_dataset> <idx> <out.png>
-"""
 from __future__ import annotations
 
 import sys
@@ -23,7 +14,7 @@ from isaac_datagen.graspableobj_to_optflow_obj import render_one
 def main():
     cfg, in_dir, idx, out_png = sys.argv[1], Path(sys.argv[2]), int(sys.argv[3]), Path(sys.argv[4])
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    runtime = load_config(cfg, [f"dataset_dir={out_png.parent}", "mode=optflow"])  # dataset_dir just needs to exist
+    runtime = load_config(cfg, [f"dataset_dir={out_png.parent}", "mode=optflow"])
     K = np.load(runtime.intrinsics_path).astype(np.float32)
     W, H = runtime.width, runtime.height
 

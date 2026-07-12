@@ -1,9 +1,3 @@
-"""Custom Replicator writer that serializes StereoSamples directly.
-
-Replaces 6 BasicWriters (left/right x rgb/seg/camera_params) with a single
-writer that composites alpha from instance segmentation, extracts world2cam
-and intrinsics from camera_params, and calls StereoSample.serialize().
-"""
 
 from pathlib import Path
 

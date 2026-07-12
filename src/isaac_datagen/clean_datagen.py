@@ -1,18 +1,7 @@
-"""Entry point: load YAML config, boot sim, build scene, capture dataset.
-
-Usage:
-    python clean_datagen.py <config.yaml> [key=value ...]
-
-The YAML is validated against RuntimeConfig; trailing args are OmegaConf
-dotlist overrides (e.g. `num_frames=8 seed=3`).
-"""
 
 from __future__ import annotations
 import os
-# Let torch reuse fragmented reserved blocks; the SD ensemble allocation otherwise
-# fails against Isaac's resident CUDA memory on the shared GPU.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-# Non-interactive / batch: skip first-import EULA prompt (Isaac Sim pip docs).
 os.environ.setdefault("OMNI_KIT_ACCEPT_EULA", "YES")
 
 from dataclasses import asdict
@@ -36,14 +25,6 @@ from vision_core.seed_utils import seed_everything
 
 
 def collect_objects(paths: list[str | Path]) -> list[GraspableObject]:
-    """Deserialize every GraspableObject from each dataset dir and concatenate.
-
-    Safe to chain across datasets: cids derive from the sorted class-name set and iids
-    from per-prim semantic labels, so neither depends on list position. The one
-    requirement is globally-unique meta["name"] — it is the USD prim-path component in
-    scene.add_object and the name_to_class key in reference_seg_writer, both last-wins
-    on a clash.
-    """
     list_of_lists = []
     for p in paths:
         path = Path(p)
@@ -60,11 +41,6 @@ def collect_objects(paths: list[str | Path]) -> list[GraspableObject]:
 
 
 def collect_preoptflow(paths: list[str | Path]) -> list[OptFlowObject]:
-    """Deserialize every OptFlowObject from each dataset dir and concatenate.
-
-    The optical-flow analog of collect_objects: same meta/ count idiom and the same
-    globally-unique meta["name"] requirement (the name is the placed prim-path component
-    in scene.add_object and the catalog join key in OptFlowMetadata)."""
     objects: list[OptFlowObject] = []
     for p in paths:
         path = Path(p)
@@ -86,7 +62,7 @@ def reference_segmentation(runtime=None):
     render_dir.mkdir(parents=True, exist_ok=True)
     from isaac_datagen import cid_iid_trace
     cid_iid_trace.init(render_dir)
-    seed_everything(runtime.effective_seed)        # seed = runtime.seed + runtime.idx; before boot_sim
+    seed_everything(runtime.effective_seed)
     app = boot_sim(runtime, render_dir)
 
     from isaac_datagen.reference_seg_writer import ObsMaskWriter
@@ -100,10 +76,6 @@ def reference_segmentation(runtime=None):
     _idx, _grasp_points, world_poses = plan_capture(runtime, scene)
 
     if runtime.dry_run:
-        # Dry run: export scene.usdz + baked debug cameras (at the planned poses) +
-        # an axis gizmo on every candidate grasp frame, for offline (Blender)
-        # inspection, then skip the writer and RTX capture entirely. world_poses is
-        # produced by the exact same code the real run uses.
         from isaac_datagen.debug_export import decorate_debug_scene, export_debug_bundle
         export_debug_bundle(decorate_debug_scene(scene, world_poses), render_dir)
         app.close()
@@ -112,10 +84,9 @@ def reference_segmentation(runtime=None):
     writer = ObsMaskWriter(runtime.descriptor_config_path, runtime.descriptor_device, scene.objects,
                            render_dir, full_alpha=runtime.obs_full_alpha)
     replicator = make_replicator(runtime, len(world_poses), render_dir)
-    warmup_render(app, runtime.warmup_frames)   # settle RTX before the writer captures
+    warmup_render(app, runtime.warmup_frames)
     capture_with_poses(world_poses, writer, scene.zed, replicator, rt_subframes=runtime.rt_subframes)
 
-    # Write the per-render-dir catalog (id-space maps + per-class reference images + DIFT features).
     writer.finalize_metadata(render_dir)
 
     with open(render_dir / 'runtime.yaml', 'w') as f:
@@ -127,15 +98,6 @@ def reference_segmentation(runtime=None):
 
 
 def optflow_generation(runtime=None):
-    """Optical-flow capture: place OptFlowObjects in clutter, capture per-frame RGB-D + camera
-    pose, and write the per-render constant catalog once. Each ``OptFlowSample`` nests a full
-    ``ObsMask`` (serialized flat) and ``OptFlowMetadata`` nests an ``ObsMaskDescriptorMetadata``, so the
-    render dir is ALSO a reference-seg render dir consumable by run_pipeline phases 2 & 3.
-
-    Mirrors reference_segmentation; plan_capture is reused purely as the camera-pose
-    generator (it aims the rig at randomly chosen grasp frames — the observation captures
-    whatever is visible). See .docs_claude/plans/active/optflow-2-writer-capture.md.
-    """
     if runtime is None:
         runtime = load_config(sys.argv[1], sys.argv[2:])
 
@@ -143,7 +105,7 @@ def optflow_generation(runtime=None):
     render_dir.mkdir(parents=True, exist_ok=True)
     from isaac_datagen import cid_iid_trace
     cid_iid_trace.init(render_dir)
-    seed_everything(runtime.effective_seed)        # before boot_sim
+    seed_everything(runtime.effective_seed)
     app = boot_sim(runtime, render_dir)
 
     from isaac_datagen.optflow_writer import OptFlowWriter
@@ -152,9 +114,8 @@ def optflow_generation(runtime=None):
         collect_preoptflow(runtime.objects_path),
         runtime.filter_specs,
     )
-    scene = scene_builders.get(runtime.scene_builder)(runtime, objects)  # build_scene (default) |
-    #                                                build_store_scene — same signature/return
-    l2w = get_target2world(scene.object_prim_paths)   # (M, 4, 4) aligned to scene.objects
+    scene = scene_builders.get(runtime.scene_builder)(runtime, objects)
+    l2w = get_target2world(scene.object_prim_paths)
 
     _idx, _grasp_points, world_poses = plan_capture(runtime, scene)
 
@@ -164,25 +125,17 @@ def optflow_generation(runtime=None):
         app.close()
         return
 
-    # obsmask.obs is RGBA whose alpha carries the instance foreground by default (recoverable
-    # straight off obs). The RGB channels are the full frame either way (composite_rgba never masks RGB;
-    # straight-alpha PNG preserves color under alpha==0), and the UFM adapter reads obs[:3], so the alpha
-    # never reaches the warp — training runs have no reason to blank it to 255. runtime.obs_full_alpha
-    # (default False) is the same inspection toggle reference_segmentation() honors, for viewing the
-    # whole frame (shelf/occluders) opaque in a normal image viewer.
     writer = OptFlowWriter(scene.objects, l2w, scene.zed.intrinsics, render_dir,
                            runtime.descriptor_config_path, runtime.descriptor_device,
-                           full_alpha=runtime.obs_full_alpha)   # obs K = zed.intrinsics
+                           full_alpha=runtime.obs_full_alpha)
     replicator = make_replicator(runtime, len(world_poses), render_dir)
-    warmup_render(app, runtime.warmup_frames)      # settle RTX before the writer captures
+    warmup_render(app, runtime.warmup_frames)
     capture_with_poses(world_poses, writer, scene.zed, replicator, rt_subframes=runtime.rt_subframes)
 
-    # Write the per-render-dir constants (nested ObsMaskDescriptorMetadata + optflow per-class catalog).
     writer.finalize_metadata(render_dir)
 
     with open(render_dir / 'runtime.yaml', 'w') as f:
         yaml.safe_dump(asdict(runtime), f)
-    # Keep the dir self-describing (phases 2/3 don't read it, but mirrors reference_segmentation).
     with open(render_dir / 'descriptor.yaml', 'w') as f:
         yaml.safe_dump(yaml.safe_load(Path(runtime.descriptor_config_path).read_text()), f)
 
@@ -190,7 +143,6 @@ def optflow_generation(runtime=None):
 
 
 def main():
-    """Console entry: parse config + dotlist overrides, then dispatch on runtime.mode."""
     parser = argparse.ArgumentParser(
         prog="isaac-datagen",
         description="Load a YAML config (+ optional key=value dotlist overrides), "

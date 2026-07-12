@@ -1,19 +1,3 @@
-"""Replicator writer that emits one ObsMask per rendered frame (NN-free).
-
-Per frame it serializes only the genuinely per-frame-unique payload — the RGBA
-observation and (H, W) masks in BOTH id spaces: the raw instance-id mask (iid_mask,
-pairs with per-instance occlusion) and a class-id mask (cid_mask) derived from it by
-a LUT over ``idToSemantics``'s class labels, so all same-class boxes share one value.
-The constant object catalog (canonical per-class reference images, precomputed DIFT
-descriptors, id-space maps) is written once per render dir via ``finalize_metadata``
-as an ``ObsMaskDescriptorMetadata``. The expensive proposer forward is deferred to a phase-2
-pass (see ``add_proposals``).
-
-Why not Isaac's ``semantic_segmentation`` annotator for the class mask: it assigns ids
-by each prim's FULL semantic-set string, and our prims carry both ``class`` and
-``instance`` labels (scene.py), so every box's string is unique and same-class boxes
-would NOT merge (see OgnSemanticSegmentation.py:150-159 — exact-string ``_get_ids``).
-"""
 
 from pathlib import Path
 
@@ -39,32 +23,16 @@ def _pil_to_tv_rgba(pil_img: PILImage.Image) -> tv_tensors.Image:
 
 
 def alpha_from_instance_seg(seg: np.ndarray, valid_ids) -> np.ndarray:
-    """Opaque only where ``seg`` is a graspable instance id; the workbench and
-    background carry ids outside ``valid_ids`` and become transparent."""
     return np.isin(seg, list(valid_ids)).astype(np.uint8) * 255
 
 
 def composite_rgba(rgb: np.ndarray, seg: np.ndarray, valid_ids, full_alpha: bool = False) -> np.ndarray:
-    # full_alpha=True → fully opaque obs (no instance crop), for inspecting the whole frame.
     alpha = (np.full(seg.shape, 255, np.uint8) if full_alpha
              else alpha_from_instance_seg(seg, valid_ids))
     return np.concatenate([rgb[:, :, :3], alpha[:, :, None]], axis=-1)
 
 
 def _occlusion_by_iid(occ, iid_to_labels, instance_mappings, present_iids) -> dict[int, float]:
-    """Map per-frame occlusion ratios onto ``instance_segmentation_fast`` mask iids.
-
-    The ``occlusion`` annotator keys ratios by *leaf-prim* id, while the seg mask keys by
-    *semantic-instance* id (iid) — different, non-aligned id spaces (verified in a kit
-    probe). Both sides expose the geo prim path, so we bridge ``leaf id → path`` via
-    ``instance_mappings`` (its ``instanceIds`` are the leaf ids occlusion keys on, ``name``
-    is the path) and ``path → iid`` via the seg payload's ``idToLabels``.
-
-    Returns ``{iid: ratio}`` for every iid in ``present_iids``; an iid with no occlusion
-    measurement (e.g. fully outside the frustum → NaN row) maps to ``float('nan')`` so the
-    caller can tell "unknown" apart from "unoccluded". Leaf ratios are averaged per object so
-    a (hypothetical) multi-mesh asset still yields one number; our assets are single-mesh.
-    """
     occ_by_leaf = {
         int(r["instanceId"]): float(r["occlusionRatio"])
         for r in occ
@@ -85,16 +53,6 @@ def _occlusion_by_iid(occ, iid_to_labels, instance_mappings, present_iids) -> di
 
 
 def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
-    """The static per-class catalog both writers build identically (shared writer init).
-
-    Returns ``(class_to_cid, name_to_class, class_to_ref, class_to_descriptors, backbone)``. cids derive
-    from the SORTED class set (start=2, mirroring Isaac 0=BACKGROUND/1=UNLABELLED) so they are
-    deterministic across render dirs that place the same class subset; each render dir stays
-    self-describing via cid_to_class. One canonical reference per class (first member by sorted
-    name; same-class members are near-duplicate box fronts). ``class_to_descriptors`` are the
-    precomputed DIFT features (C, h, w) — the only NN forward, run once here so per-frame
-    ``write()`` stays NN-free.
-    """
     classes = sorted({obj.meta["class"] for obj in object_specs})
     class_to_cid = {cls: cid for cid, cls in enumerate(classes, start=2)}
     name_to_class = {obj.meta["name"]: obj.meta["class"] for obj in object_specs}
@@ -102,12 +60,10 @@ def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
     for obj in sorted(object_specs, key=lambda o: o.meta["name"]):
         class_to_ref.setdefault(obj.meta["class"], _pil_to_tv_rgba(obj.reference_image))
 
-    backbone = yaml.safe_load(Path(descriptor_config_path).read_text())["name"]  # SubfolderDict key
+    backbone = yaml.safe_load(Path(descriptor_config_path).read_text())["name"]
     from reference_matching import descriptor as descriptor_module
     descriptor = descriptor_module.from_config(descriptor_config_path).to(descriptor_device)
     with torch.inference_mode():
-        # descriptor owns prep (public contract) + leaf packaging (to_leaf): single-scale -> (C, h, w),
-        # keyed FPN -> {scale: (C_k, h_k, w_k)}. No prep/shape knowledge in the writer.
         class_to_descriptors = {
             cls: descriptor.to_leaf(descriptor(descriptor.prep(tv_rgba).unsqueeze(0).to(descriptor_device)))
             for cls, tv_rgba in class_to_ref.items()
@@ -117,12 +73,6 @@ def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
 
 
 def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
-    """Build one ``ObsMask`` from a render product's annotator payload.
-
-    Returns ``(ObsMask, frame_iid_to_name)``: the per-frame RGBA observation + cid/iid masks +
-    per-instance occlusion, plus the ``{iid → instance name}`` this frame (for the caller's
-    session-local ``iid_to_name`` accumulation). Raises if the frame has no labeled instances.
-    """
     rp = data["renderProducts"][rp_key]
     seg_hw = rp["instance_segmentation_fast"]["data"]
     labels = rp["instance_segmentation_fast"]["idToSemantics"]
@@ -131,7 +81,6 @@ def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
     if not frame_iid_to_name:
         raise ValueError("write() called with no labeled instances — expected ≥1")
 
-    # Per-instance occlusion, keyed by the same iids as iid_mask (graspable iids present this frame).
     from omni.syntheticdata.scripts import helpers
     present_iids = {int(i) for i in np.unique(seg_hw)} & set(frame_iid_to_name)
     iid_to_occlusion = _occlusion_by_iid(
@@ -150,15 +99,6 @@ def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
 
 def obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descriptors, iid_to_name,
                      backbone):
-    """Build the per-render-dir ``ObsMaskDescriptorMetadata`` from the static catalog + accumulated iids.
-
-    The shared PCA→RGB basis is fit over ALL classes' tokens (each (C,h,w) → (h*w, C), stacked —
-    the same ``flatten(1).T`` tokenization consumers read), so every class projects into
-    comparable colors. ``class_to_descriptors`` and ``principal_components`` are stored as
-    ``SubfolderDict``s keyed by ``backbone`` (the descriptor registry name), so other backbones can be
-    added beside this one without re-rendering. Delegates to the shared ``vision_core`` builder so the
-    real-world testset converter emits a byte-identical catalog.
-    """
     return build_obsmask_metadata(class_to_cid, name_to_class, class_to_ref, class_to_descriptors,
                                   iid_to_name, backbone)
 
@@ -179,14 +119,12 @@ class ObsMaskWriter(Writer):
                 "instance_segmentation_fast",
                 init_params={"colorize": False},
             ),
-            # Per-leaf-prim occlusion ratio (0=unoccluded … 1=fully occluded). Keyed by
-            # leaf-prim id, NOT the mask's semantic-instance id (iid) — see _occlusion_by_iid.
             AnnotatorRegistry.get_annotator("occlusion"),
         ]
         self._render_dir = Path(render_dir)
         self._frame_id = 0
         self._full_alpha = full_alpha
-        self.iid_to_name: dict[int, str] = {}   # accumulated per frame (iids are session-local)
+        self.iid_to_name: dict[int, str] = {}
         from isaac_datagen import cid_iid_trace
         if not cid_iid_trace.enabled():
             cid_iid_trace.init(self._render_dir)
@@ -208,7 +146,6 @@ class ObsMaskWriter(Writer):
         self._frame_id += 1
 
     def finalize_metadata(self, directory: str | Path | None = None):
-        """Serialize the per-render-dir catalog once (at idx=0). Call after capture."""
         directory = Path(directory) if directory is not None else self._render_dir
         obsmask_metadata(self.class_to_cid, self.name_to_class, self.class_to_ref,
                          self.class_to_descriptors, self.iid_to_name,

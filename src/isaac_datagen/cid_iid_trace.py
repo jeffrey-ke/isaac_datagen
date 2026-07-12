@@ -1,4 +1,3 @@
-"""Append-only cid/iid trace log hook (re-enable via ``log()`` at instrument points)."""
 
 from __future__ import annotations
 

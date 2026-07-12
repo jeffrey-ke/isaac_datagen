@@ -1,4 +1,3 @@
-"""Replicator-driven stereo capture orchestration."""
 
 from __future__ import annotations
 
@@ -12,14 +11,6 @@ from isaac_datagen import posers
 
 
 def get_target2world(target_paths):
-    """Compute local-to-world SE3 poses for a batch of prim paths.
-
-    Args:
-        target_paths: sequence of prim paths.
-
-    Returns:
-        (B, 4, 4) array of target-to-world SE3 matrices.
-    """
     from pxr import UsdGeom, Usd
     from isaacsim.core.utils.stage import get_current_stage
     stage = get_current_stage()
@@ -33,45 +24,22 @@ def get_target2world(target_paths):
 
 
 def plan_capture(runtime, scene):
-    """Pick per-target grasp frames and the world camera poses.
-
-    THE single computation both the real render (reference_segmentation) and the
-    dry-run debug export depend on, so the two can never drift apart.
-
-    Returns:
-        (idx, grasp_points, world_poses): the chosen grasp-point indices, their
-        prim paths, and the (B*N, 4, 4) world camera poses (targets × planned poses).
-    """
     idx = (np.arange(len(scene.grasp_points)) if runtime.num_targets is None
            else np.random.choice(len(scene.grasp_points), size=runtime.num_targets))
     grasp_points = [scene.grasp_points[i] for i in idx]
-    target2worlds = get_target2world(grasp_points)                       # (B, 4, 4)
+    target2worlds = get_target2world(grasp_points)
     poser = posers.get(runtime.pose_generation_policy)(**runtime.pose_generation_policy_args)
-    target_frame_poses = poser(runtime.num_frames)                       # (N, 4, 4)
-    # (B, N, 4, 4) -> (B*N, 4, 4): flatten target and pose dims into one batch.
+    target_frame_poses = poser(runtime.num_frames)
     world_poses = np.einsum('bij,njk->bnik', target2worlds, target_frame_poses).reshape(-1, 4, 4)
     return idx, grasp_points, world_poses
 
 
 def se3_to_pos_euler(pose):
-    """SE3 -> (translation, euler_xyz_deg).
-
-    THE single SE3 decomposition. move_prims feeds this to rep.modify.pose for the
-    live capture; the dry-run baker feeds it to set_transform. Sharing it (rather
-    than the application call, which differs) is what keeps the baked debug cameras
-    landing exactly where the rendered cameras would.
-    """
     return (pose[:3, 3].tolist(),
             R.from_matrix(pose[:3, :3]).as_euler('xyz', degrees=True).tolist())
 
 
 def set_prim_pose(prim_path, pose):
-    """Author an SE3 world pose onto the prim at `prim_path`.
-
-    Prim-path-string addressed; consistent with move_prims by construction —
-    set_transform authors the same USD ops (xformOp:translate + xformOp:rotateXYZ)
-    that rep.modify.pose authors, fed the identical euler triple from se3_to_pos_euler.
-    """
     from isaacsim.core.utils.stage import get_current_stage
     from isaac_datagen.isaac_utils import set_transform
     translation, rotation = se3_to_pos_euler(pose)
@@ -80,7 +48,6 @@ def set_prim_pose(prim_path, pose):
 
 
 def broadcast(a: Sequence, b: Sequence):
-    """Numpy-style elementwise pairing with length-1 broadcasting."""
     if len(a) == 0 or len(b) == 0:
         raise ValueError("sequences must be non-empty")
     if len(a) == len(b):
@@ -94,8 +61,6 @@ def broadcast(a: Sequence, b: Sequence):
 
 def _broadcast_pairs(writers: Sequence, cameras: Sequence):
     if len(writers) == 1 and len(cameras) > 1:
-        # 1 writer drains many cameras: one attach call with union of rps,
-        # because writer.attach clobbers _writer_id on a second call.
         union = [rp for cam in cameras for rp in cam.rps]
         return [(writers[0], union)]
     return [(w, list(cam.rps)) for w, cam in broadcast(writers, cameras)]
@@ -108,18 +73,6 @@ def attach_writers(pairs):
 
 @contextmanager
 def capture_session(writers, cameras, n_frames, replicator, rt_subframes=20, per_frame=None):
-    """Open a Replicator capture scope around caller-defined per-frame ops.
-
-    Enters rep.new_layer(), attaches writers to camera render products under
-    broadcast rules, yields rep so the caller can open whatever triggers and
-    modifiers they want, then drives n_frames steps and waits for completion.
-
-    per_frame(i), if given, runs immediately before step i: direct USD writes
-    made there reach frame i's render. This is how lighting jitters — the
-    graph route (rep.modify inside a rep.randomizer.register'd fn) provably
-    never executes, while direct in-trigger modify nodes (move_prims) do; see
-    .docs_claude/lighting-jitter-mechanism.md.
-    """
     rep = replicator.rep
     pairs = _broadcast_pairs(writers, cameras)
     with rep.new_layer():
@@ -144,15 +97,6 @@ def move_prims(prims, pose_sequences, replicator):
 
 
 def capture_with_poses(world_poses, writer, camera, replicator, rt_subframes=20):
-    """Move camera through world_poses and capture one frame per pose.
-
-    Args:
-        world_poses: sequence of (4,4) SE3 matrices in the world frame.
-        writer: initialized Replicator Writer, not yet attached.
-        camera: camera object with .prim_path and .rps attributes.
-        replicator: scene replicator handle (has .rep and .apply_randomizers()).
-        rt_subframes: subframes per captured frame (PT material-load slack + denoise).
-    """
     rep = replicator.rep
     rig_node = rep.get.prim_at_path(camera.prim_path)
     with capture_session(
