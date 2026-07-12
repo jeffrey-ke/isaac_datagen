@@ -1,0 +1,74 @@
+# K-shot FINE-TUNE POOL for held-out class snack033, ONE catalog instance, EMPTY WORLD.
+# Regenerates datasets/snack033-1inst (replacing the store-scene render of
+# store001-optflow-snacks-kshot-snack033-1inst.yaml) with a wider camera-distance spread:
+# the store's validated halo box (x [0.3,0.9], y ±0.3, z [-0.2,0.3]) capped distance at
+# ~1 m and shelving occluded everything beyond ~1.75 m; the empty world exercises the
+# full expanded box. `DisablePhysics` is REQUIRED here: store-extracted catalog usdz carry
+# a live RigidBodyAPI and free-fall without shelf support (see
+# plans/completed/plain-scene-mutations-disable-physics.md). NOT set2 — set2 stays the
+# frozen held-out validation benchmark.
+mode: optflow
+scene: empty
+seed: 1001                      # solo fine-tune pool series; NOT 1 (set1/set2's seed)
+idx: 0
+num_targets: null               # single catalog instance selected below -> exactly one target
+num_frames: 200
+dataset_dir: datasets/snack033-1inst   # MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:0
+proposer_device: cpu
+dry_run: False
+inlier_border_eps: 0.0
+
+# ── Plain scene builder: bare /World, object placed by stacker, physics disabled,
+#    grasp frame replayed from the Stage-A curated catalog grasp_point ─────────
+scene_builder: build_scene
+scene_builder_args:
+  grasp_frames: catalog
+  mutations:
+    - {name: DisablePhysics, args: {pattern: snack033}}
+placement: UntilExhaustedStacker
+placement_args: {max_column_height: 1}
+
+# ── Lighting: expanded-refseg-v2 dome+key recipe incl. per-frame jitter ──────
+dome_light: True
+dome_fill_intensity: 200.0
+distant_light: True
+distant_intensity: 2000.0
+distant_angle: 0.53
+distant_light_offset: [1.0, -3.0, 3.0]
+jitter_distant: True
+distant_offset_jitter: 2.0
+distant_intensity_jitter: [500.0, 4000.0]
+distant_temperature_jitter: [4500.0, 8500.0]
+jitter_dome: True
+dome_intensity_range: [100.0, 350.0]
+light_jitter_patterns: []
+
+# ── Poses: EXPANDED halo box (store pool was x [0.3,0.9], y ±0.3, z [-0.2,0.3]) ──
+pose_generation_policy: LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+xrange: [0.3, 2.0]
+yrange: [-2.0, 2.0]
+zrange: [-0.7, 0.7]
+
+# ── Catalog subset: exactly ONE instance (catalog has 6 snack033 entries; a class
+#    filter alone would place all 6) ──────────────────────────────────────────
+objects_path:
+  - ../../assets/optflow_objects/store001-optflow-objects-keep
+filter_specs:
+  - name: RegexFilter
+    args: {key: store_prim, value: '^model_snack033/'}   # base instance only, not _1.._5
+
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32

@@ -1,8 +1,7 @@
-"""USD scene building — boxes, stacks, lighting, assets, sim bootstrap."""
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List
 
@@ -21,9 +20,7 @@ class SceneHandle:
     zed: ZedMini
     grasp_points: list
     objects: List[GraspableObject]
-    object_prim_paths: List[str] = None   # placed-object wrapper paths, aligned to `objects`
-                                          # (== create_stack_of_objects' prim_paths_added); used to
-                                          # read each object's local2world in the optflow orchestrator
+    object_prim_paths: List[str] = None
 
 RESOURCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
 
@@ -31,7 +28,7 @@ RESOURCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resour
 def add_object(*, at_parent: str, obj: GraspableObject) -> str:
     from isaacsim.core.utils.stage import get_current_stage
     from isaacsim.core.utils.semantics import add_labels
-    wrapper_path = add_wrapped_reference(                       # same wrapper/geo mechanics
+    wrapper_path = add_wrapped_reference(
         at_parent=at_parent, name=obj.meta["name"], usd_path=obj.usd_path)
     geo = get_current_stage().GetPrimAtPath(f"{wrapper_path}/geo")
     add_labels(geo, labels=[obj.meta["class"]], instance_name="class")
@@ -40,13 +37,9 @@ def add_object(*, at_parent: str, obj: GraspableObject) -> str:
 
 
 def add_wrapped_reference(*, at_parent: str, name: str, usd_path: str) -> str:
-    # Wrapper Xform + /geo reference child (Isaac ignores xformOps on a
-    # reference-carrying prim; catalog usdz have no defaultPrim -> "/World").
-    # NO labels: add_object labels geo plainly; store swaps label via
-    # label_product's override->remove->add ordering instead.
     from pxr import Usd, Tf
     from isaacsim.core.utils.stage import get_current_stage
-    wrapper_path = f"{at_parent}/{Tf.MakeValidIdentifier(name)}"   # YCB names lead with digits
+    wrapper_path = f"{at_parent}/{Tf.MakeValidIdentifier(name)}"
     stage = get_current_stage()
     with Usd.EditContext(stage, stage.GetRootLayer()):
         stage.DefinePrim(wrapper_path, "Xform")
@@ -113,8 +106,6 @@ class ReplicatorWrapper:
             fn()
 
     def register_per_frame(self, fn):
-        """fn(i): direct USD writes applied by the capture step loop right
-        before frame i renders (capture_session per_frame hook)."""
         self._per_frame.append(fn)
 
     def per_frame(self, i):
@@ -123,13 +114,6 @@ class ReplicatorWrapper:
 
 
 def register_dome_jitter(replicator, prim_path, runtime, num_frames):
-    """Per-frame dome-fill intensity jitter via direct USD writes from the
-    capture step loop. The whole schedule is precomputed with a seeded rng
-    (stream decorrelated from the key light's) and returned for
-    lighting_log.json — schedule == applied. Graph jitter (rep.modify inside a
-    rep.randomizer.register'd fn) provably never executes on build_scene
-    lights; see .docs_claude/lighting-jitter-mechanism.md.
-    """
     from pxr import Usd, UsdLux
     from isaacsim.core.utils.stage import get_current_stage
     stage = get_current_stage()
@@ -145,26 +129,13 @@ def register_dome_jitter(replicator, prim_path, runtime, num_frames):
 
 
 def register_distant_jitter(replicator, prim_path, runtime, num_frames):
-    """Per-frame key-light jitter for the aimed DistantLight, via direct USD
-    writes from the capture step loop (the SDK's own existing-light idiom —
-    infinigen randomize_lights — after the graph route proved a no-op; see
-    .docs_claude/lighting-jitter-mechanism.md).
-
-    Direction: a per-frame jittered "sun" offset (distant_light_offset +
-    U(-j, j)³) re-aimed via look_at_euler. The centroid cancels out of the aim,
-    so no prim readback or centroid value is needed and the base direction
-    matches build_scene by construction. Intensity / color temperature:
-    per-frame uniform draws. The full schedule is precomputed with a seeded rng
-    and returned for lighting_log.json — schedule == applied. Returns
-    (base_euler, rotations, intensities | None, temperatures | None).
-    """
     from pxr import Usd, UsdLux
     from isaacsim.core.utils.stage import get_current_stage
     stage = get_current_stage()
     prim = stage.GetPrimAtPath(prim_path)
     light = UsdLux.DistantLight(prim)
-    base = look_at_euler(runtime.distant_light_offset, (0.0, 0.0, 0.0))   # nominal aim (matches build_scene)
-    rng = np.random.default_rng([runtime.effective_seed, 0])              # reproducible; decorrelated from dome
+    base = look_at_euler(runtime.distant_light_offset, (0.0, 0.0, 0.0))
+    rng = np.random.default_rng([runtime.effective_seed, 0])
     rotations = sample_offset_eulers(runtime.distant_light_offset, runtime.distant_offset_jitter, num_frames, rng)
     intensities = temperatures = None
     if runtime.distant_intensity_jitter is not None:
@@ -176,7 +147,7 @@ def register_distant_jitter(replicator, prim_path, runtime, num_frames):
         light.GetEnableColorTemperatureAttr().Set(True)
 
     def jitter_distant(i):
-        set_transform(prim, rotation=rotations[i])   # root-layer rotateXYZ — the op build_scene aimed with
+        set_transform(prim, rotation=rotations[i])
         with Usd.EditContext(stage, stage.GetRootLayer()):
             if intensities is not None:
                 light.GetIntensityAttr().Set(intensities[i])
@@ -196,34 +167,21 @@ def register_background_jitter(rep, replicator, prim_path, texture_paths):
 
 
 def register_light_pattern_jitter(replicator, spec, runtime, num_frames, stream):
-    """Per-frame intensity jitter for EXISTING lights matched by name pattern
-    (LightJitterSpec — store mode: the store's own lights). Light types unknown
-    up front → UsdLux.LightAPI, valid for any modern UsdLux light. Scale factors
-    against each light's authored base intensity, not absolute values —
-    preserves the scene's authored light balance. Same register_per_frame +
-    precomputed seeded-schedule idiom as register_dome_jitter; returns the
-    schedule for lighting_log.json — schedule == applied. rng stream
-    [seed, 2, k] decorrelates from the distant ([seed, 0]) and dome ([seed, 1])
-    streams."""
     from pxr import Usd, UsdLux
     from isaacsim.core.utils.stage import get_current_stage
     stage = get_current_stage()
     lights = {}
-    for p in find_prims(spec.root, spec.pattern):            # raises if nothing matches
+    for p in find_prims(spec.root, spec.pattern):
         attr = UsdLux.LightAPI(stage.GetPrimAtPath(p)).GetIntensityAttr()
         if attr and attr.IsValid():
             lights[p] = (attr, float(attr.Get()))
     assert lights, f"light_jitter_patterns matched no UsdLux lights: {spec}"
-    # Log-uniform: light is perceptually multiplicative, so sample the factor
-    # uniformly in stops — a doubling is equally likely anywhere in range. A raw
-    # uniform draw over a wide ratio range (e.g. [0.25, 8]) puts half the frames
-    # above the geometric midpoint's square (mostly washed-out bright looks).
     lo, hi = spec.intensity_scale_range
     factors = np.exp(np.random.default_rng(
         [runtime.effective_seed, 2, stream]).uniform(np.log(lo), np.log(hi), num_frames)).tolist()
 
     def jitter_lights(i):
-        with Usd.EditContext(stage, stage.GetRootLayer()):   # override over the reference arc
+        with Usd.EditContext(stage, stage.GetRootLayer()):
             for attr, base in lights.values():
                 attr.Set(base * factors[i])
     replicator.register_per_frame(jitter_lights)
@@ -241,22 +199,6 @@ def register_box_texture_jitter(rep, replicator, texture_paths, shader_paths):
 
 
 def make_replicator(runtime, num_frames, render_dir):
-    """Build the per-frame randomizers: lighting via step-loop USD writes,
-    textures via the Replicator graph.
-
-    The DistantLight key + DomeLight fill are authored (aimed) in build_scene.
-    Per-frame lighting jitter registers here when enabled, seeded run-to-run by
-    runtime.effective_seed: the key light re-lights every frame (direction +
-    intensity + color-temperature) when jitter_distant is on, and the dome fill
-    intensity jitters when jitter_dome is on. Both default off → static
-    lighting. Lighting jitters as register_per_frame callbacks — direct USD
-    writes applied by capture_session right before each step — because graph
-    modifies on the build_scene lights never execute (see
-    .docs_claude/lighting-jitter-mechanism.md); the full schedules land in
-    lighting_log.json, so the log records what was APPLIED, not intent.
-    `num_frames` is len(world_poses) (= num_targets × num_frames) threaded from
-    the call site for the schedule lengths + the lighting_log header.
-    """
     import omni.replicator.core as rep
     from omni.replicator.core.utils.rng import set_global_seed
     set_global_seed(runtime.effective_seed)
@@ -269,12 +211,10 @@ def make_replicator(runtime, num_frames, render_dir):
         log["DistantLight"] = {
             "base_rotation_xyz_deg": list(base),
             "offset_jitter_m": runtime.distant_offset_jitter,
-            "rotations_xyz_deg": [list(r) for r in rotations],   # exact applied per-frame schedule
+            "rotations_xyz_deg": [list(r) for r in rotations],
             "intensity": intensities if intensities is not None else runtime.distant_intensity,
             "temperature": temperatures,
         }
-    # The DomeLight fill is static unless jitter_dome is on. Logged as a bare
-    # per-frame list — the shape measure_luminance.load_lighting joins against.
     if runtime.dome_light and runtime.jitter_dome:
         log["DomeLight"] = register_dome_jitter(replicator, "/World/DomeLight", runtime, num_frames)
     if runtime.background_textures:
@@ -313,31 +253,18 @@ def make_sphere_light(stage, parent, intensity=5000.0, radius=0.1):
 
 
 def look_at_euler(eye, target):
-    """Euler XYZ (deg) orienting a -Z-emitting USD prim (light/camera) to look eye→target.
-
-    Same convention as LookAtPoser: vision_core.look_at is +Z-forward (OpenCV); cv2opengl
-    flips it to USD's -Z-forward. Eye magnitude is irrelevant for a distant light (direction only).
-    """
     from vision_core.pose_utils import look_at, cv2opengl
     pose = cv2opengl(look_at(np.asarray(target, float), np.asarray(eye, float)))
     return tuple(R.from_matrix(pose[:3, :3]).as_euler("xyz", degrees=True))
 
 
 def sample_offset_eulers(offset, jitter, n, rng):
-    """n euler-XYZ (deg) rotations = the key light aimed from a per-frame
-    jittered "sun" position (offset + U(-jitter, jitter) per axis) toward the
-    grasp centroid. Only direction matters for a DistantLight, so the centroid
-    cancels — reuse look_at_euler(eye=offset+δ, target=origin), the same
-    convention build_scene aims with. Only the component of δ transverse to the
-    ray tilts the direction; the offset length sets the angular spread."""
     offset = np.asarray(offset, float)
     deltas = rng.uniform(-jitter, jitter, size=(n, 3))
     return [look_at_euler(eye=offset + d, target=(0.0, 0.0, 0.0)) for d in deltas]
 
 
 def make_distant_light(stage, parent, intensity=3000.0, angle=0.53, rotation=(0.0, 0.0, 0.0)):
-    """Directional KEY light. Emits along local -Z; `rotation` (rotateXYZ euler deg) aims it —
-    pass look_at_euler(eye, centroid) so it points at the wall, not the floor."""
     from pxr import UsdLux
     from isaacsim.core.utils.prims import create_prim
     path = f"{parent}/DistantLight"
@@ -355,11 +282,7 @@ def boot_sim(runtime, render_dir):
         "headless": True,
         "width": runtime.width,
         "height": runtime.height,
-        # multi_gpu ruled out as the cause of the intermittent all-black render
-        # (11/15 black with False vs 9/15 with True — unchanged).
         "multi_gpu": True,
-        # "active_gpu": 0,
-        # "physics_gpu": 0,
     })
 
     import carb.settings
@@ -376,42 +299,16 @@ def boot_sim(runtime, render_dir):
     s.set("/omni/replicator/backends/disk/root_dir", os.path.abspath(render_dir))
     rep.settings.set_render_pathtraced()
 
-    # Make rendering block: each app.update() returns only after Hydra has
-    # finished the frame, instead of dispatching it async and continuing. This
-    # is what the `isaacsim.exp.base.zero_delay.kit` experience flips on (and
-    # what SimulationContext.set_block_on_render(True) sets). Without it the
-    # warmup_render() loop's app.update() calls are fire-and-forget, so a fixed
-    # warmup_frames count can return before RTX has actually settled — the
-    # lit-vs-black coin flip. The paired updateOrder setting moves the
-    # render-complete check last for true zero-frame-delay. (base.kit already
-    # disables async *replicator* rendering for SDG; this is the stronger
-    # per-update blocking guarantee on top of that.)
     s.set("/app/hydraEngine/waitIdle", True)
     s.set("/app/updateOrder/checkForHydraRenderComplete", 1000)
 
-    # Intermittent all-black-render fix: by default a PT capture does NOT
-    # accumulate samples across the subframes of a single captured frame — the
-    # accumulation buffer resets every subframe, so each frame is effectively one
-    # noisy sample whose lit-vs-black outcome is a per-process coin flip (forum:
-    # "Replicator Path Tracing samples do not accumulate" /t/229697; the official
-    # PT capture preset sets this too). Turning it on makes the rt_subframes
-    # subframes accumulate into a converged frame. The orchestrator bumps
-    # /rtx/externalFrameCounter once per captured frame, so accumulation still
-    # resets cleanly between frames.
     s.set("/rtx-transient/resetPtAccumOnlyWhenExternalFrameCounterChanges", True)
 
-    # Dark-box fix: the captured `rgb` AOV is post-tonemap LDR (ACES, op=6) and
-    # auto-exposure is off, so exposure is fixed by the photographic triangle.
-    # The shipped exposureTime=0.02s default underexposed the dome-lit scene into
-    # the ACES toe → uint8 crush to 0. Set a fixed exposure to land the box wall
-    # in the midtones; auto-exposure stays off so the per-frame dataset is
-    # deterministic. See RuntimeConfig.set_exposure / exposure_time / f_number.
     if runtime.set_exposure:
         s.set("/rtx/post/tonemap/exposureTime", runtime.exposure_time)
         s.set("/rtx/post/tonemap/fNumber", runtime.f_number)
         s.set("/rtx/post/tonemap/filmIso", runtime.film_iso)
 
-    # Confirm the RTX post/tonemap state that actually took (op==6 ACES expected).
     print("[TONEMAP] " + " ".join(
         f"{k}={s.get(k)!r}" for k in (
             "/rtx/post/tonemap/op",
@@ -426,11 +323,6 @@ def boot_sim(runtime, render_dir):
 
 
 def warmup_render(app, n_frames):
-    """Settle the RTX renderer before capture: step the app n_frames times so MDL shaders
-    compile, the dome HDRI/textures stream in, and the PT/denoiser state initializes.
-    Without this the first captured frame(s) are a lit-vs-black coin flip (see boot_sim's
-    accumulation note). Mirrors Isaac's camera-sensor warmup (isaacsim.sensors.camera tests:
-    N x app.update() before reading pixels). n_frames == 0 is a no-op."""
     for _ in range(n_frames):
         app.update()
 
@@ -439,13 +331,6 @@ def add_grasp_frame(box_path):
     from isaacsim.core.utils.stage import get_current_stage
     from pxr import Usd, UsdGeom
     box_prim = get_current_stage().GetPrimAtPath(box_path)
-    # Bottom-front edge of the bbox in the prim's OWN local frame. Use
-    # ComputeUntransformedBound, NOT ComputeLocalBound/local_bbox_range: grasp
-    # frames are added AFTER the wrapper is slotted, and ComputeLocalBound bakes
-    # that placement into the midpoint — doubling the offset and flinging the
-    # grasp frame (and the camera tied to it) off the object. Untransformed bound
-    # ignores the prim's own placement, so the offset is purely geometric (and a
-    # no-op for centered boxes — origin == bbox center).
     bb = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
     cx, cy, cz = bb.ComputeUntransformedBound(box_prim).ComputeAlignedRange().GetMidpoint()
     half = bounding_half_extents(box_prim)
@@ -458,23 +343,13 @@ SHADOW_SHAPES = ("Cube", "Cone", "Cylinder", "Sphere")
 
 
 def add_shadow_occluders(stage, parent, grasp_frames, runtime):
-    """Place runtime.occluders_per_target invisible occluders per grasp target.
-
-    Each occluder casts a path-traced shadow on its box but is hidden from the
-    camera (primvars:hideForCamera=True) and carries no semantic label, so only
-    its shadow reaches obs/masks. Positioned ONCE: a single occluder-Poser sample
-    in the target frame, mapped to world via that target's target2world. Must run
-    AFTER the stack is positioned so each grasp frame's target2world is final.
-    Per-frame shadow variety comes from the moving camera + per-frame light jitter;
-    cross-render variety from the per-render-seeded poser (seed + idx).
-    """
     from pxr import Sdf, UsdGeom
     from isaacsim.core.utils.prims import create_prim
     from isaac_datagen import posers
     from isaac_datagen.capture import get_target2world, set_prim_pose
 
     poser = posers.get(runtime.occluder_pose_policy)(**runtime.occluder_pose_policy_args)
-    target2worlds = get_target2world(grasp_frames)                       # (M, 4, 4)
+    target2worlds = get_target2world(grasp_frames)
     create_prim(f"{parent}/ShadowOccluders", "Xform")
     for ti, t2w in enumerate(target2worlds):
         for k in range(runtime.occluders_per_target):
@@ -482,11 +357,52 @@ def add_shadow_occluders(stage, parent, grasp_frames, runtime):
             s = runtime.occluder_scale if runtime.occluder_scale is not None else float(np.random.uniform(0.04, 0.2))
             create_prim(path, SHADOW_SHAPES[(ti + k) % len(SHADOW_SHAPES)], scale=(s, s, s))
             UsdGeom.PrimvarsAPI(stage.GetPrimAtPath(path)).CreatePrimvar(
-                "hideForCamera", Sdf.ValueTypeNames.Bool).Set(True)      # doNotCastShadows left unset
-            set_prim_pose(path, t2w @ poser(1)[0])                       # target-frame sample → world
+                "hideForCamera", Sdf.ValueTypeNames.Bool).Set(True)
+            set_prim_pose(path, t2w @ poser(1)[0])
+
+
+def _bbox_grasp_frame(path, obj):
+    return add_grasp_frame(path)
+
+
+def _catalog_grasp_frame(path, obj):
+    from isaac_datagen.store_scene import add_catalog_grasp_frame  # lazy (import cycle)
+    return add_catalog_grasp_frame(path, obj)
+
+
+GRASP_FRAME_SOURCES = {"bbox": _bbox_grasp_frame, "catalog": _catalog_grasp_frame}
+
+
+@dataclass(frozen=True)
+class PlainSceneSpec:
+    mutations: list = field(default_factory=list)  # unknown keys -> TypeError (fail loud)
+    grasp_frames: str = "bbox"  # "catalog" replays the Stage-A baked grasp_point
+
+    def __post_init__(self):
+        from isaac_datagen import store_mutations  # lazy: store_mutations->extract_store_objects->scene cycle
+        assert self.grasp_frames in GRASP_FRAME_SOURCES, \
+            f"grasp_frames must be one of {sorted(GRASP_FRAME_SOURCES)}: {self.grasp_frames!r}"
+        for m in self.mutations:
+            assert isinstance(m, dict) and m.get("name") and set(m) <= {"name", "args"}, \
+                f"mutation spec must be {{name, args?}}: {m!r}"
+            assert getattr(store_mutations.get(m["name"]), "PLAIN_SAFE", False), \
+                f"mutation {m['name']!r} is store-only (reads StoreSceneSpec fields)"
+
+
+def apply_plain_mutations(stack_path, spec, objects, objects_paths, effective_seed):
+    from isaacsim.core.utils.stage import get_current_stage
+    from isaac_datagen import store_mutations  # lazy (import cycle)
+    targets = [store_mutations.CaptureTarget(o, p) for o, p in zip(objects, objects_paths)]
+    root = get_current_stage().GetPrimAtPath(stack_path)  # walk root = the stack (all placed objects)
+    targets = store_mutations.apply_mutations(root, spec, targets, effective_seed)
+    assert [t.prim_path for t in targets] == list(objects_paths), \
+        "plain-scene mutations must not add/remove/reorder targets (in-place stage edits only)"
+    return [t.obj for t in targets]  # honors in-place obj replacement
 
 
 def build_scene(runtime, objects: List[GraspableObject]):
+    spec = PlainSceneSpec(**runtime.scene_builder_args)
+
     from isaacsim.core.utils.stage import create_new_stage, get_current_stage
     from isaacsim.core.utils.prims import create_prim
     from isaacsim.core.utils.semantics import add_labels
@@ -494,17 +410,12 @@ def build_scene(runtime, objects: List[GraspableObject]):
     create_new_stage()
     stage = get_current_stage()
 
-    # Define /World as an Xform and mark it the defaultPrim. Without a defaultPrim
-    # the stage exports to an invalid/near-empty USD(Z) and references to the
-    # result fail to resolve.
     world_prim = create_prim("/World", "Xform")
     stage.SetDefaultPrim(world_prim)
 
     if runtime.scene != "empty":
         load_asset("/World/Workbench", os.path.join(RESOURCE_PATH, "workbench_world.usd"))
 
-    # Dome is a low ambient fill so shadowed faces don't crush to black; the DistantLight
-    # key (created below, after the geometry exists, so it can be aimed) is the main source.
     make_dome_light(stage, "/World",
                     intensity=runtime.dome_fill_intensity if runtime.dome_light else 0.0,
                     normalize=runtime.dome_normalize)
@@ -516,9 +427,12 @@ def build_scene(runtime, objects: List[GraspableObject]):
         objects,
         runtime,
     )
+    objects = apply_plain_mutations(stack_path, spec, objects, objects_paths, runtime.effective_seed)
 
     graspable_paths = [p for p, v in is_graspable.items() if v]
-    grasp_frames_paths = [add_grasp_frame(p) for p in graspable_paths]
+    make_grasp_frame = GRASP_FRAME_SOURCES[spec.grasp_frames]
+    obj_by_path = dict(zip(objects_paths, objects))
+    grasp_frames_paths = [make_grasp_frame(p, obj_by_path[p]) for p in graspable_paths]
 
     set_transform(
         get_current_stage().GetPrimAtPath(stack_path),
@@ -527,8 +441,8 @@ def build_scene(runtime, objects: List[GraspableObject]):
 
     if runtime.distant_light:
         from isaac_datagen.capture import get_target2world
-        centroid = get_target2world(grasp_frames_paths)[:, :3, 3].mean(0)   # world wall center
-        eye = centroid + np.asarray(runtime.distant_light_offset, float)    # "sun" pos; direction only
+        centroid = get_target2world(grasp_frames_paths)[:, :3, 3].mean(0)
+        eye = centroid + np.asarray(runtime.distant_light_offset, float)
         make_distant_light(stage, "/World", intensity=runtime.distant_intensity,
                            angle=runtime.distant_angle, rotation=look_at_euler(eye, centroid))
 
@@ -538,18 +452,6 @@ def build_scene(runtime, objects: List[GraspableObject]):
     intrinsics = np.load(runtime.intrinsics_path)
     zed = ZedMini("gripper", "/World", intrinsics, width=runtime.width, height=runtime.height)
 
-    # from pxr import UsdGeom, Usd
-    # grasp_point = grasp_points[rng.randint(len(grasp_points))]
-    # ` ah here is where the grasp_point is used.
-    # target2world = np.array(
-    #     UsdGeom.Xformable(grasp_point).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
-    # ).T
-    # target_pose = plan_poses(runtime.target_to_baseline_ypr_desired,
-    #                          runtime.xrange, runtime.yrange, runtime.zrange, 1)[0]
-    # world_pose = target2world @ target_pose
-    # pos = tuple(world_pose[:3, 3].tolist())
-    # rot = tuple(R.from_matrix(world_pose[:3, :3]).as_euler('xyz', degrees=True).tolist())
-    # set_transform(zed.prim, translation=pos, rotation=rot)
 
     return SceneHandle(zed=zed, objects=objects, grasp_points=grasp_frames_paths,
                        object_prim_paths=objects_paths)

@@ -1,21 +1,3 @@
-"""Store-shelf mutations registry (posers/placers/filters idiom): remove or swap
-store products before capture.
-
-A mutation is a callable ``mutation(store, spec, targets, rng) -> targets``: it
-edits the live stage AND returns the updated CaptureTarget binding list in the
-same call, so the writer's ``scene.objects[i] <-> object_prim_paths[i]`` contract
-cannot drift. build_store_scene applies ``make_mutations(spec.mutations)`` IN ORDER,
-between binding resolution (each filtered catalog object bound to its own store
-prim) and the uniform label_product loop; swapped-in wrappers are never re-mutated.
-Stage A (extract_store_objects) ignores mutations entirely. Mutations draw from the
-reproducible seed stream ``[effective_seed, 3]`` — streams 0/1/2 are the light jitters'.
-
-Classes must be defined IN this module for get() to find them (the
-import-to-register footgun once dropped ShelfPlacer). Module-level imports are
-kit-free (parse_sku from extract_store_objects is cycle-safe — it never imports
-store_scene at module level); kit-touching imports (capture, scene, clean_datagen,
-isaac_utils) are DEFERRED inside functions.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -33,44 +15,44 @@ from isaac_datagen.objects import OptFlowObject
 
 @dataclass(frozen=True)
 class CaptureTarget:
-    """Binding between a catalog object (what it is: class/name, reference data,
-    grasp_point — what the writer records) and the live prim where it physically
-    is (whose LOCAL frame equals the usdz frame: store v_0 node or swap wrapper —
-    where l2w is read, labels authored, GraspPoint added)."""
     obj: OptFlowObject
     prim_path: str
 
 
-def get(name):                                   # posers/placers/... idiom, KeyError on miss
+def get(name):
     try:
         return getattr(sys.modules[__name__], name)
     except AttributeError as e:
         raise KeyError(name) from e
 
 
-def make_mutations(specs: list[dict]) -> list:   # mirrors filters.make_filters
+def make_mutations(specs: list[dict]) -> list:
     return [get(s["name"])(**s.get("args", {})) for s in specs]
 
 
+def apply_mutations(root, spec, targets, effective_seed):
+    rng = np.random.default_rng([effective_seed, 3])  # stream 3 = mutations (0/1/2 = light jitters)
+    for mutation in make_mutations(spec.mutations):
+        targets = mutation(root, spec, targets, rng)
+    assert targets, "mutations left no captureable targets"
+    names = [t.obj.meta["name"] for t in targets]
+    assert len(names) == len(set(names)), f"duplicate names after mutations: {names}"
+    return targets
+
+
 def active_products(store, patterns) -> list:
-    """ACTIVE direct product children scoped to the config's product globs.
-    GetChildren honors the default predicate -> previously deactivated products
-    drop out. Deliberately NOT matched_products/find_prims: those raise per
-    pattern on zero matches, but a prior mutation may legitimately empty one;
-    each mutation asserts its OWN class pattern matched instead. Scoping also
-    keeps parse_sku off non-product prims (model_store001 -> class 'store001')."""
     return [c for c in store.GetChildren()
             if any(fnmatch.fnmatchcase(c.GetName(), pat) for pat in patterns)]
 
 
 def _matching_products(store, spec, pattern) -> list:
     prims = [p for p in active_products(store, spec.product_patterns)
-             if fnmatch.fnmatchcase(parse_sku(p.GetName())[1], pattern)]   # [1] = SKU class
+             if fnmatch.fnmatchcase(parse_sku(p.GetName())[1], pattern)]
     assert prims, f"class pattern {pattern!r} matches no ACTIVE store product"
     return prims
 
 
-def _drop_under(targets, removed_paths):         # trailing "/" avoids _2 vs _20 prefix hits
+def _drop_under(targets, removed_paths):
     pref = tuple(f"{p}/" for p in removed_paths)
     return [t for t in targets if not t.prim_path.startswith(pref)]
 
@@ -81,13 +63,11 @@ def _bbox(bbox_range):
     return lo, hi
 
 
-def _bottom_center(lo, hi):                      # usdz-frame shelf-contact anchor (Z-up)
+def _bottom_center(lo, hi):
     return np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
 
 
 def _orthonormal_rotation(l2w):
-    """Product-site rotation with the ancestor model_* scale divided out.
-    Fail-loud on what set_prim_pose (translate+rotate, NO scale) can't reproduce."""
     sc = np.linalg.norm(l2w[:3, :3], axis=0)
     assert np.allclose(sc, sc[0], rtol=1e-3), f"non-uniform scale in product l2w: {sc}"
     rot = l2w[:3, :3] / sc
@@ -98,37 +78,26 @@ def _orthonormal_rotation(l2w):
 
 @dataclass(frozen=True)
 class ProductSite:
-    """What a replacement needs to know about the original product, captured
-    BEFORE deactivation (bbox and l2w are unreadable once the prim is pruned)."""
-    name: str            # SKU instance, e.g. cereal001_2
-    path: str            # model_* prim path (what gets deactivated)
-    lo: np.ndarray       # v_0 usdz-frame bbox
+    name: str
+    path: str
+    lo: np.ndarray
     hi: np.ndarray
-    l2w: np.ndarray      # v_0 local-to-world, incl. ancestor scale
-    grasp: np.ndarray    # grasp frame the config's policy mints at this bbox
-    #                      ("which way does the front face point")
+    l2w: np.ndarray
+    grasp: np.ndarray
 
 
 def measure_site(stage, prim, policy) -> ProductSite:
-    """Read everything off the original product before it is deactivated."""
     from isaac_datagen.capture import get_target2world
     from isaac_datagen.isaac_utils import untransformed_bbox_range
     name, cls = parse_sku(prim.GetName())
     v0_path = f"{prim.GetPath().pathString}/v_0"
-    assert stage.GetPrimAtPath(v0_path).IsValid(), f"no v_0 under {prim.GetPath()}"  # Stage-A contract
+    assert stage.GetPrimAtPath(v0_path).IsValid(), f"no v_0 under {prim.GetPath()}"
     lo, hi = _bbox(untransformed_bbox_range(stage.GetPrimAtPath(v0_path)))
     return ProductSite(name=name, path=prim.GetPath().pathString, lo=lo, hi=hi,
                        l2w=get_target2world([v0_path])[0], grasp=policy(lo, hi, cls))
 
 
 def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r) -> np.ndarray:
-    """World pose for the swap wrapper. Rotation: aim the replacement's grasp
-    face where the original's pointed (catalogs disagree on which local axis is
-    "front", and the camera poser aims at the grasp face — without this a swap
-    could face into the shelf; both grasp frames are +X-face/+Z-up, so a
-    store->store swap degenerates to the original rotation). Translation: put
-    the replacement's bbox bottom-center on the original's shelf-contact point,
-    at the replacement's own real size."""
     rot = _orthonormal_rotation(site.l2w) @ site.grasp[:3, :3] @ grasp_r[:3, :3].T
     pose = np.eye(4)
     pose[:3, :3] = rot
@@ -138,10 +107,6 @@ def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r) -> np.ndarray:
 
 
 def insert_replacement(stage, src: OptFlowObject, site: ProductSite) -> CaptureTarget:
-    """Reference src's usdz under a /World/StoreSwaps wrapper, seat it at the
-    site, return the new binding. Name minted unique per site (ReplicateFilter
-    precedent). NO labels here — the uniform label_product loop applies the
-    override ordering that store-extracted usdz require (arm A)."""
     from isaac_datagen.capture import set_prim_pose
     from isaac_datagen.isaac_utils import untransformed_bbox_range
     from isaac_datagen.scene import add_wrapped_reference
@@ -154,9 +119,6 @@ def insert_replacement(stage, src: OptFlowObject, site: ProductSite) -> CaptureT
 
 
 class RemoveClass:
-    """Deactivate EVERY active store product whose SKU class fnmatches `pattern`;
-    drop its bindings. Store-wide: unlabeled distractor instances go too — an
-    emptied shelf slot, not a hidden mesh."""
     def __init__(self, pattern: str):
         assert pattern, "RemoveClass needs a non-empty class glob"
         self.pattern = pattern
@@ -166,22 +128,19 @@ class RemoveClass:
         removed = []
         for prim in _matching_products(store, spec, self.pattern):
             removed.append(prim.GetPath().pathString)
-            deactivate_prim(prim)                             # model_* root, not v_0
+            deactivate_prim(prim)
             print(f"[MUT] RemoveClass({self.pattern!r}): {removed[-1]}", flush=True)
         return _drop_under(targets, removed)
 
 
 class ReplaceClass:
-    """Swap EVERY active store product whose SKU class fnmatches `pattern` for an
-    OptFlowObject drawn (seeded, with replacement) from `catalog`, seated at the
-    removed product's shelf pose. Store-wide like RemoveClass."""
     def __init__(self, pattern: str, catalog: str, source_class: str = "*"):
         assert pattern, "ReplaceClass needs a non-empty class glob"
         assert Path(catalog, "meta").is_dir(), f"not an object-dataset dir: {catalog}"
         self.pattern, self.catalog, self.source_class = pattern, catalog, source_class
 
     def _sources(self):
-        from isaac_datagen.clean_datagen import collect_preoptflow   # deferred: cycle
+        from isaac_datagen.clean_datagen import collect_preoptflow
         objs = [o for o in collect_preoptflow([self.catalog])
                 if fnmatch.fnmatchcase(o.meta["class"], self.source_class)]
         assert objs, f"source_class {self.source_class!r} matches nothing in {self.catalog}"
@@ -192,12 +151,12 @@ class ReplaceClass:
         sources = self._sources()
         policy = grasp_policies.get(spec.grasp_frame_policy)(**spec.grasp_frame_policy_args)
         stage = store.GetStage()
-        create_empty("StoreSwaps", "/World")                  # Xform.Define: idempotent
+        create_empty("StoreSwaps", "/World")
         removed, added = [], []
         for prim in _matching_products(store, spec, self.pattern):
-            site = measure_site(stage, prim, policy)          # reads BEFORE deactivation
+            site = measure_site(stage, prim, policy)
             deactivate_prim(prim)
-            src = sources[int(rng.integers(len(sources)))]    # seeded draw, with replacement
+            src = sources[int(rng.integers(len(sources)))]
             added.append(insert_replacement(stage, src, site))
             removed.append(site.path)
             print(f"[MUT] ReplaceClass({self.pattern!r}): {site.path} -> "
@@ -206,29 +165,20 @@ class ReplaceClass:
 
 
 class RemoveUntrackedProducts:
-    """Deactivate EVERY active store product (scoped to spec.product_patterns) whose SKU
-    class is NOT among the tracked targets — the keep-list COMPLEMENT. Drops the SKUs a
-    curated keep-list leaves out in one spec, without enumerating them (the front-face
-    keep-map lists only what to keep). Store-wide, like RemoveClass; untracked prims have
-    no CaptureTarget binding, so targets pass through unchanged."""
     def __call__(self, store, spec, targets, rng):
         from isaac_datagen.isaac_utils import deactivate_prim
         tracked = {t.obj.meta["class"] for t in targets}
         removed = []
         for prim in active_products(store, spec.product_patterns):
-            if parse_sku(prim.GetName())[1] not in tracked:    # [1] = SKU class
+            if parse_sku(prim.GetName())[1] not in tracked:
                 removed.append(prim.GetPath().pathString)
-                deactivate_prim(prim)                          # model_* root, not v_0
+                deactivate_prim(prim)
         print(f"[MUT] RemoveUntrackedProducts: deactivated {len(removed)} untracked "
               f"product(s), kept {len(tracked)} classes", flush=True)
         return _drop_under(targets, removed)
 
 
 class RemovePrims:
-    """Deactivate specific store products by EXACT prim name (e.g. 'model_snack012_3') and
-    prune their CaptureTargets. Per-instance complement of RemoveClass — for store-authoring
-    quirks (label-inward / permanently occluded facings) where the class stays but individual
-    facings must go. Fail-loud: every name must match an active product under the config globs."""
     def __init__(self, names: list):
         assert names, "RemovePrims needs a non-empty prim-name list"
         self.names = list(names)
@@ -240,6 +190,28 @@ class RemovePrims:
         assert not missing, f"RemovePrims: no active product prim named {missing}"
         removed = [by_name[n].GetPath().pathString for n in self.names]
         for n in self.names:
-            deactivate_prim(by_name[n])                        # model_* root, like RemoveClass
+            deactivate_prim(by_name[n])
         print(f"[MUT] RemovePrims: deactivated {len(removed)} product prim(s)", flush=True)
         return _drop_under(targets, removed)
+
+
+class DisablePhysics:
+    PLAIN_SAFE = True  # reads no StoreSceneSpec fields; usable from build_scene
+
+    def __init__(self, pattern: str):
+        assert pattern, "DisablePhysics needs a non-empty prim-name glob"
+        self.pattern = pattern
+
+    def __call__(self, root, spec, targets, rng):
+        from pxr import Usd
+        from isaac_datagen.isaac_utils import disable_rigid_body
+        matched = [p for p in Usd.PrimRange(root)
+                   if fnmatch.fnmatchcase(p.GetName(), self.pattern)]
+        assert matched, f"DisablePhysics({self.pattern!r}): no prim matches under {root.GetPath()}"
+        subtree = {q.GetPath().pathString: q  # dict dedup: broad patterns nest matches
+                   for m in matched for q in Usd.PrimRange(m)}
+        disabled = [path for path, q in sorted(subtree.items()) if disable_rigid_body(q)]
+        assert disabled, f"DisablePhysics({self.pattern!r}): matched prims carry no rigid body"
+        print(f"[MUT] DisablePhysics({self.pattern!r}): disabled {len(disabled)} rigid body(ies)",
+              flush=True)
+        return targets

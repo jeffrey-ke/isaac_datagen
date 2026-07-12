@@ -132,6 +132,10 @@ OpenCV) then composes as `T_ref→obs = inv(cam2world) @ l2w @ ref_pose`.
   (inert — capture never steps physics; PhysX logs one benign
   foundLostAggregatePairsCapacity warning at attach). Products carry
   PhysicsRigidBodyAPI + PhysicsMaterial in their subtrees (inert, ride into usdz).
+  **[Correction 2026-07-12: inert only where products rest on shelf colliders — i.e.
+  in the store scene. On the plain `build_scene` path PhysX steps during capture and a
+  store-extracted usdz free-falls; see
+  `plans/active/plain-scene-mutations-disable-physics.md`.]**
 - **Vendor semantics**: store assets author LEGACY-style class semantics
   (`semantic:Semantics_xxxx:params:{semanticType=class, semanticData=snack}`) on BOTH
   `v_0` AND the leaf mesh (`v_0/E_snack_1`) — the cause of problem 6 below.

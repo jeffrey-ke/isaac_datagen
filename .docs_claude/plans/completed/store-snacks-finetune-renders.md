@@ -2,6 +2,12 @@
 
 **Status 2026-07-11: DONE — all 8 renders complete and verified.** Variant-A kshot yamls deleted,
 the 4 `-1inst` yamls reseeded to 1001, the 4 new `set1-plus-*` yamls written; no-kit sanity passed.
+
+**[2026-07-12: solo `-1inst` DATA superseded** — the 4 pools were regenerated in an empty world
+with expanded camera ranges (`emptyworld-optflow-snacks-kshot-*-1inst.yaml`, DisablePhysics
+mutation, curated catalog grasp frames); store renders parked at `datasets/parked-store-1inst/`.
+The store kshot configs and the set1+X family are unchanged. See
+`plans/completed/emptyworld-1inst-regeneration.md`.**]**
 All 8 renders ran on tesu (2 sequential chains, one per 4090, 12:35–13:52, ~77 min total) and
 passed every verification gate: exit 0, `[MUT]` counts exactly as tabled (409/409/407/407 solo ·
 384/384/382/382 set1+X), `cid_to_class` exact, frame counts exact (200×4 · 1240/1240/1320/1320),
