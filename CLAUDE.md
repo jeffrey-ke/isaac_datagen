@@ -66,6 +66,8 @@ uv run clean_datagen.py <config.yaml>
 
 Config + OmegaConf dotlist overrides, e.g. `uv run clean_datagen.py src/isaac_datagen/configs/randomized.yaml idx=0 num_frames=8`. Console script: `isaac-datagen` → `reference_segmentation`.
 
+Long-running launches (renders, descriptor bakes): put nohup logs and wrapper scripts in `launch-logs/` at the repo root (gitignored) — keep it as the one place to check on/attribute past launches.
+
 ## Module index
 
 | Module | Role | Key exports |

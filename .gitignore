@@ -22,3 +22,6 @@ wheels/
 
 # Personal scratch — notes, evidence dumps, anything not meant to be committed.
 /.scratch
+
+# Render/bake launch logs + wrapper scripts (convention: CLAUDE.md Quick start).
+/launch-logs
