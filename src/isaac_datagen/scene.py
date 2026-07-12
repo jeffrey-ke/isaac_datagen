@@ -27,13 +27,35 @@ RESOURCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resour
 
 def add_object(*, at_parent: str, obj: GraspableObject) -> str:
     from isaacsim.core.utils.stage import get_current_stage
-    from isaacsim.core.utils.semantics import add_labels
     wrapper_path = add_wrapped_reference(
         at_parent=at_parent, name=obj.meta["name"], usd_path=obj.usd_path)
-    geo = get_current_stage().GetPrimAtPath(f"{wrapper_path}/geo")
-    add_labels(geo, labels=[obj.meta["class"]], instance_name="class")
-    add_labels(geo, labels=[obj.meta["name"]], instance_name="instance")
+    label_product(get_current_stage().GetPrimAtPath(f"{wrapper_path}/geo"), obj)
     return wrapper_path
+
+
+def label_product(prim, obj) -> dict:
+    from isaacsim.core.utils.semantics import add_labels, remove_labels
+    displaced = _override_vendor_class_labels(prim, obj.meta["class"])
+    remove_labels(prim, include_descendants=True)
+    add_labels(prim, labels=[obj.meta["class"]], instance_name="class")
+    add_labels(prim, labels=[obj.meta["name"]], instance_name="instance")
+    return displaced
+
+
+def _override_vendor_class_labels(prim, cls: str) -> dict:
+    # legacy vendor opinions compose through the reference arc: deletable no, overridable yes
+    from pxr import Usd
+    displaced = {}
+    for p in Usd.PrimRange(prim):
+        for attr in p.GetAttributes():
+            name = attr.GetName()
+            if (name.startswith("semantic:") and name.endswith(":params:semanticType")
+                    and attr.Get() == "class"):
+                data = p.GetAttribute(name.replace(":semanticType", ":semanticData"))
+                if data and data.Get() != cls:
+                    displaced[str(data.GetPath())] = data.Get()
+                    data.Set(cls)
+    return displaced
 
 
 def add_wrapped_reference(*, at_parent: str, name: str, usd_path: str) -> str:

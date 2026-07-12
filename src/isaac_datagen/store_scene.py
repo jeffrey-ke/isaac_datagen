@@ -8,7 +8,7 @@ import numpy as np
 from isaac_datagen import grasp_policies, store_mutations
 from isaac_datagen.hardwares import ZedMini
 from isaac_datagen.isaac_utils import create_empty, load_asset
-from isaac_datagen.scene import SceneHandle, make_dome_light
+from isaac_datagen.scene import SceneHandle, label_product, make_dome_light
 
 STORE_ROOT = "/World/Store"
 STORE_DEFAULT_PRIM = "/root"
@@ -51,26 +51,6 @@ def resolve_product_prim(store, obj):
     prim = store.GetStage().GetPrimAtPath(path)
     assert prim.IsValid(), f"catalog object {obj.meta['name']}: no prim at {path}"
     return prim
-
-
-def label_product(prim, obj):
-    from isaacsim.core.utils.semantics import add_labels, remove_labels
-    _override_vendor_class_labels(prim, obj.meta["class"])
-    remove_labels(prim, include_descendants=True)
-    add_labels(prim, labels=[obj.meta["class"]], instance_name="class")
-    add_labels(prim, labels=[obj.meta["name"]], instance_name="instance")
-
-
-def _override_vendor_class_labels(prim, cls: str):
-    from pxr import Usd
-    for p in Usd.PrimRange(prim):
-        for attr in p.GetAttributes():
-            name = attr.GetName()
-            if (name.startswith("semantic:") and name.endswith(":params:semanticType")
-                    and attr.Get() == "class"):
-                data = p.GetAttribute(name.replace(":semanticType", ":semanticData"))
-                if data and data.Get() != cls:
-                    data.Set(cls)
 
 
 def add_catalog_grasp_frame(prim_path: str, obj) -> str:
