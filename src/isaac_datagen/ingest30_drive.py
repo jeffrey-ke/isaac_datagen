@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -91,6 +92,14 @@ def score_commands(root, label, protocol, steps) -> list[Cmd]:
     return [_seg("ingest30-score", root, label, "--protocol", protocol, *extra)]
 
 
+def smoke_commands(root) -> list[Cmd]:
+    # smoke cfg paths (zed_K.npy, ../../../usds/store001.usd) are relative to
+    # src/isaac_datagen; the inner render subprocess inherits this cwd
+    return [Cmd(["uv", "run", "isaac-datagen-ingest30-smoke",
+                 str(Path(root) / "manifest.yaml")],
+                WS / "isaac_datagen" / "src" / "isaac_datagen", drop_pythonpath=True)]
+
+
 def run_cmd(cmd: Cmd, log) -> None:
     env = {k: v for k, v in os.environ.items()
            if not (cmd.drop_pythonpath and k == "PYTHONPATH")}
@@ -124,6 +133,12 @@ def _init_manifest(a) -> ScriptArgs:
             f"{manifest} exists with DIFFERENT asset lists — new lists need a new root (or --force)"
         print("[meta] init resuming from existing manifest")
         return sa
+    assert not (root / "datasets").exists(), \
+        f"{root}/datasets exists — --force rebuilds catalogs+manifest only; stale renders " \
+        "must be deleted by hand (exact paths) if the asset lists changed"
+    for stale in (root / "catalogs" / "base", root / "catalogs" / "ingest"):
+        if stale.exists():
+            shutil.rmtree(stale)   # tool-owned regenerable copies; exact names, no globs
     base_classes = assemble_catalog(base_assets, root / "catalogs" / "base")
     ingest_classes = assemble_catalog(ingest_assets, root / "catalogs" / "ingest")
     overlap = set(base_classes) & set(ingest_classes)
@@ -163,14 +178,15 @@ def run_arm(a) -> None:
 
 
 def run_score(a) -> None:
+    assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
     subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"])
     run_stage("score", a.label, score_commands(a.root, a.label, a.protocol, a.steps), a.root)
 
 
 def run_smoke(a) -> None:
+    assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
     subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"])
-    run_stage("smoke", "store", [_dgen("isaac-datagen-ingest30-smoke",
-                                       str(Path(a.root) / "manifest.yaml"))], a.root)
+    run_stage("smoke", "store", smoke_commands(a.root), a.root)
 
 
 VERBS = {"init": run_init, "arm": run_arm, "score": run_score, "smoke": run_smoke}

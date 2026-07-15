@@ -1,9 +1,13 @@
+import argparse
+from pathlib import Path
+
 import pytest
 import yaml
 
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_drive import (
-    VERBS, arm_commands, score_commands, stage_bake, stage_render,
+    VERBS, _init_manifest, arm_commands, score_commands, smoke_commands,
+    stage_bake, stage_render,
 )
 
 MANIFEST = dict(
@@ -79,3 +83,50 @@ def test_score_commands():
 
 def test_verb_registry_complete():
     assert list(VERBS) == ["init", "arm", "score", "smoke"]
+
+
+def test_smoke_commands():
+    (cmd,) = smoke_commands("/r")
+    assert cmd.argv[-1].endswith("manifest.yaml")
+    assert str(cmd.cwd).endswith("src/isaac_datagen")  # smoke cfg paths are relative to here
+    assert cmd.drop_pythonpath                         # Isaac needs clean env
+
+
+def test_init_force_semantics(tmp_path, monkeypatch):
+    import isaac_datagen.asset_catalogs as ac
+    assembled = []
+
+    def fake_assemble(paths, dest):
+        dest = Path(dest)
+        assert not dest.exists()                       # force must have cleared it
+        dest.mkdir(parents=True)
+        assembled.append(dest.name)
+        return {"base": ["zebra"], "ingest": ["apple", "kiwi"]}[dest.name]
+
+    monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "assemble_catalog", fake_assemble)
+
+    a = argparse.Namespace(
+        root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
+        descriptor="D", descriptor_config="/refmatch/fpn.yaml",
+        seed_base=1, seed_pools=2, seed_test=3,
+        base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+        pool_frames=3, test_store_num_frames=1,
+        test_composed_num_dirs=1, test_composed_num_targets=1,
+        test_composed_num_frames=1, test_composed_replicas=1,
+    )
+
+    (tmp_path / "datasets").mkdir()                    # (a) renders present -> refuse
+    with pytest.raises(AssertionError, match="datasets"):
+        _init_manifest(a)
+    (tmp_path / "datasets").rmdir()
+
+    for name in ("base", "ingest"):                    # (b) stale catalogs -> rebuilt
+        d = tmp_path / "catalogs" / name
+        d.mkdir(parents=True)
+        (d / "stale.txt").write_text("old")
+    sa = _init_manifest(a)
+    assert assembled == ["base", "ingest"]
+    assert not (tmp_path / "catalogs" / "base" / "stale.txt").exists()
+    assert (tmp_path / "manifest.yaml").exists()
+    assert sa.base_classes == ["zebra"] and sa.ingest_classes == ["apple", "kiwi"]
