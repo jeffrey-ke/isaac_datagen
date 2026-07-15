@@ -1,0 +1,81 @@
+import pytest
+import yaml
+
+from vision_core.script_args import ScriptArgs
+from isaac_datagen.ingest30_drive import (
+    VERBS, arm_commands, score_commands, stage_bake, stage_render,
+)
+
+MANIFEST = dict(
+    root="", base_assets=[], ingest_assets=[],
+    base_classes=["zebra"], ingest_classes=["apple", "kiwi"],
+    descriptor="D", descriptor_bake_config="/refmatch/fpn.yaml",
+    seeds=dict(base=1, pools=2, test=3),
+    base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+    pool_frames=3, test_store_num_frames=1,
+    test_composed_num_dirs=1, test_composed_num_targets=1,
+    test_composed_num_frames=1, test_composed_replicas=1,
+)
+
+
+def sa_(tmp_path):
+    dg = tmp_path / "configs" / "datagen"
+    dg.mkdir(parents=True)
+    for name in ("base.yaml", "pool-apple.yaml", "pool-kiwi.yaml",
+                 "test-store.yaml", "test-composed.yaml"):
+        # _rendered() reads dataset_dir; none of these dirs exist -> all jobs emitted
+        (dg / name).write_text(yaml.safe_dump(
+            {"dataset_dir": str(tmp_path / "datasets" / name.removesuffix(".yaml"))}))
+    p = tmp_path / "manifest.yaml"
+    p.write_text(yaml.safe_dump(MANIFEST | {"root": str(tmp_path)}))
+    return ScriptArgs.load(p)
+
+
+def test_render_commands(tmp_path):
+    cmds = stage_render(sa_(tmp_path))
+    argvs = [" ".join(c.argv) for c in cmds]
+    assert sum("base.yaml idx=0" in a for a in argvs) == 1
+    assert sum("base.yaml idx=1" in a for a in argvs) == 1     # base_num_dirs=2
+    assert sum("pool-apple.yaml idx=0" in a for a in argvs) == 1
+    assert sum("test-composed.yaml idx=0" in a for a in argvs) == 1
+    assert all(c.drop_pythonpath for c in cmds)                # Isaac needs clean env
+
+
+def test_bake_commands(tmp_path):
+    sa = sa_(tmp_path)
+    for d in ("datasets/base", "datasets/pools/apple-1inst", "datasets/test/store"):
+        (tmp_path / d).mkdir(parents=True)
+    cmds = stage_bake(sa)
+    joined = [" ".join(c.argv) for c in cmds]
+    assert all("add-backbone" in a and "/refmatch/fpn.yaml" in a for a in joined)
+    assert len(cmds) == 3
+
+
+def test_arm_commands_two_phase():
+    cmds = arm_commands("/r", "gligen", "b.yaml", "i.yaml",
+                        label=None, all_data=False, allow_dirty=True)
+    joined = [" ".join(c.argv) for c in cmds]
+    assert len(cmds) == 2
+    assert "ingest30-base-train /r gligen b.yaml --label gligen" in joined[0]
+    assert "ingest30-loop /r gligen i.yaml --label gligen" in joined[1]
+    assert all("--allow-dirty" in j for j in joined)
+
+
+def test_arm_retrained_maps_to_closed():
+    cmds = arm_commands("/r", "retrained", "r.yaml", None,
+                        label=None, all_data=True, allow_dirty=False)
+    (cmd,) = cmds                                              # base-train ONLY, no loop
+    j = " ".join(cmd.argv)
+    assert "ingest30-base-train /r closed r.yaml --label retrained --all-data" in j
+    with pytest.raises(AssertionError, match="retrained"):
+        arm_commands("/r", "retrained", "r.yaml", "i.yaml",
+                     label=None, all_data=True, allow_dirty=False)
+
+
+def test_score_commands():
+    (cmd,) = score_commands("/r", "gligen", "solo", steps=None)
+    assert " ".join(cmd.argv).endswith("ingest30-score /r gligen --protocol solo")
+
+
+def test_verb_registry_complete():
+    assert list(VERBS) == ["init", "arm", "score", "smoke"]
