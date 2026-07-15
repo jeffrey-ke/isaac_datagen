@@ -1,0 +1,77 @@
+# Decentered variant of snack031-1inst (isaac_datagen/.docs_claude/plans/active/
+# decentered-1inst-pools-and-shift-aug.md, Track A). Same seed + halo draw order as the
+# centered sibling -> identical camera POSITIONS (generate_random_offsets is called before
+# any decentering draw); orientation is the only camera delta. DecenteredLookAtPoser samples
+# the target's on-screen pixel instead of always centering it, so this is a clean A/B smoke
+# test of the poser before scaling to all 4 -1inst classes.
+mode: optflow
+scene: empty
+seed: 1001                      # DELTA vs LookAtPoser sibling: none -- same seed, positions match
+idx: 0
+num_targets: null               # single catalog instance selected below -> exactly one target
+num_frames: 200
+dataset_dir: datasets/snack031-1inst-decentered   # DELTA (a): NEW dir, MUST pre-exist
+intrinsics_path: zed_K.npy
+
+descriptor_device: cuda:0
+proposer_device: cpu
+dry_run: False
+inlier_border_eps: 0.0
+
+# ── Plain scene builder: bare /World, object placed by stacker, physics disabled,
+#    grasp frame replayed from the Stage-A curated catalog grasp_point ─────────
+scene_builder: build_scene
+scene_builder_args:
+  grasp_frames: catalog
+  mutations:
+    - {name: DisablePhysics, args: {pattern: snack031}}
+placement: UntilExhaustedStacker
+placement_args: {max_column_height: 1}
+
+# ── Lighting: expanded-refseg-v2 dome+key recipe incl. per-frame jitter ──────
+dome_light: True
+dome_fill_intensity: 200.0
+distant_light: True
+distant_intensity: 2000.0
+distant_angle: 0.53
+distant_light_offset: [1.0, -3.0, 3.0]
+jitter_distant: True
+distant_offset_jitter: 2.0
+distant_intensity_jitter: [500.0, 4000.0]
+distant_temperature_jitter: [4500.0, 8500.0]
+jitter_dome: True
+dome_intensity_range: [100.0, 350.0]
+light_jitter_patterns: []
+
+# ── Poses: same EXPANDED halo box as the centered sibling; DecenteredLookAtPoser instead
+#    of LookAtPoser (DELTA (b)), + new decentering args (DELTA (c)) ──────────────────
+pose_generation_policy: DecenteredLookAtPoser     # DELTA (b): was LookAtPoser
+pose_generation_policy_args:
+  xrange: ${xrange}
+  yrange: ${yrange}
+  zrange: ${zrange}
+  intrinsics_path: ${intrinsics_path}             # DELTA (c): sibling interpolation (top-level key exists)
+  resolution: [1920, 1080]                        # DELTA (c): matches ZedMini defaults
+  object_radius: 0.25                             # DELTA (c): bounding sphere, per-class tunable
+  margin_deg: 1.0                                 # DELTA (c)
+  max_roll_deg: 15.0                              # DELTA (c)
+xrange: [0.3, 2.0]
+yrange: [-2.0, 2.0]
+zrange: [-0.7, 0.7]
+
+# ── Catalog subset: exactly ONE instance (catalog has 6 snack031 entries; a class
+#    filter alone would place all 6) ──────────────────────────────────────────
+objects_path:
+  - ../../assets/optflow_objects/store001-optflow-objects-keep
+filter_specs:
+  - name: RegexFilter
+    args: {key: store_prim, value: '^model_snack031/'}   # base instance only, not _1.._5
+
+proposer_config_path: ../../../reference_matching/src/reference_matching/configs/grid_proposal.yaml
+descriptor_config_path: ../../../reference_matching/src/reference_matching/configs/descriptor.yaml
+set_exposure: True
+exposure_time: 1.0
+f_number: 5.0
+film_iso: 100.0
+rt_subframes: 20
+warmup_frames: 32
