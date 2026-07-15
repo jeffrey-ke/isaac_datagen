@@ -92,6 +92,14 @@ MANIFEST = [
         # below filters tar members by extension so the exact prefix depth doesn't matter.
         "license_note": "CC BY-NC 4.0",
     },
+    {
+        "category": "retail",
+        "subfolder": "retail",
+        "access": "s3_tar",
+        "id": "http://trax-geometry.s3.amazonaws.com/cvpr_challenge/SKU110K_fixed.tar.gz",
+        "cap": 5000,
+        "license_note": "SKU-110K dense retail shelves — academic/research use only",
+    },
 ]
 
 
