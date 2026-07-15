@@ -1,0 +1,86 @@
+import yaml
+
+from vision_core.script_args import ScriptArgs
+from isaac_datagen.ingest30_configs import (
+    base_config, pool_config, test_store_config, test_composed_config, write_all,
+)
+
+ARGS = dict(
+    root="",                                    # filled per test
+    base_assets=[], ingest_assets=[],           # writer never reads these; classes carry the info
+    base_classes=["cereal001", "sauces001"],
+    ingest_classes=["snack031", "flour001"],
+    descriptor="CleanDiftFpn",
+    descriptor_bake_config="refmatch/fpn.yaml",
+    seeds=dict(base=3001, pools=3101, test=3201),
+    base_num_dirs=2, base_num_targets=4, base_num_frames=10, base_replicas=5,
+    pool_frames=100, test_store_num_frames=5,
+    test_composed_num_dirs=1, test_composed_num_targets=4,
+    test_composed_num_frames=10, test_composed_replicas=3,
+)
+
+
+def fake_assembled(root, name, classes):
+    meta = root / "catalogs" / name / "meta"
+    meta.mkdir(parents=True)
+    for i, c in enumerate(classes):
+        (meta / f"meta_{i:04d}.yaml").write_text(yaml.safe_dump(
+            {"name": c, "class": c, "store_prim": f"model_{c}/v_0"}))
+
+
+def sa_for(tmp_path):
+    import copy
+    d = copy.deepcopy(ARGS)
+    root = tmp_path / "root"
+    d["root"] = str(root)
+    fake_assembled(root, "base", ["cereal001", "sauces001"])
+    fake_assembled(root, "ingest", ["snack031", "flour001"])
+    p = tmp_path / "manifest.yaml"
+    p.write_text(yaml.safe_dump(d))
+    return ScriptArgs.load(p)
+
+
+def test_pool_config(tmp_path):
+    sa = sa_for(tmp_path)
+    cfg = pool_config(sa, "snack031")
+    assert cfg["seed"] == 3101 and cfg["num_frames"] == 100
+    assert cfg["dataset_dir"].endswith("datasets/pools/snack031-1inst")
+    assert cfg["filter_specs"] == [
+        {"name": "RegexFilter", "args": {"key": "class", "value": "^snack031$"}}]
+    assert {"name": "DisablePhysics", "args": {"pattern": "snack031"}} \
+        in cfg["scene_builder_args"]["mutations"]
+    assert cfg["objects_path"] == [str(sa.ingest_catalog)]
+
+
+def test_base_config(tmp_path):
+    sa = sa_for(tmp_path)
+    cfg = base_config(sa, ["cereal001", "sauces001"])
+    assert cfg["seed"] == 3001 and cfg["num_targets"] == 4 and cfg["num_frames"] == 10
+    assert cfg["filter_specs"][0] == {
+        "name": "ReplicateFilter", "args": {"key": "name", "value": "*", "count": 5}}
+    muts = cfg["scene_builder_args"]["mutations"]
+    assert {"name": "DisablePhysics", "args": {"pattern": "cereal001"}} in muts
+
+
+def test_store_config_covers_all_classes(tmp_path):
+    sa = sa_for(tmp_path)
+    cfg = test_store_config(sa, ["cereal001", "flour001", "sauces001", "snack031"])
+    assert cfg["seed"] == 3201
+    assert cfg["scene_builder"] == "build_store_scene"
+    v = cfg["filter_specs"][0]["args"]["value"]
+    assert v == "^(cereal001|flour001|sauces001|snack031)$"
+    assert cfg["scene_builder_args"]["mutations"] == [{"name": "RemoveUntrackedProducts"}]
+    assert cfg["objects_path"] == [str(sa.base_catalog), str(sa.ingest_catalog)]
+
+
+def test_write_all(tmp_path):
+    sa = sa_for(tmp_path)
+    written = write_all(sa)
+    names = {p.name for p in written}
+    assert {"base.yaml", "pool-snack031.yaml", "pool-flour001.yaml",
+            "test-store.yaml", "test-composed.yaml"} <= names
+    root = tmp_path / "root"
+    assert (root / "datasets" / "pools" / "snack031-1inst").is_dir()
+    assert (root / "configs" / "datagen" / "smoke" / "snack031.yaml").exists()
+    for p in written:                                    # every file is valid yaml
+        yaml.safe_load(p.read_text())

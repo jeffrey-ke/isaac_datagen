@@ -62,6 +62,8 @@ isaac-datagen-viz-gate = "isaac_datagen.viz_gate:main"
 isaac-datagen-measure-luminance = "isaac_datagen.measure_luminance:main"
 # gate (no Isaac): per-frame cid/iid mask consistency after phase 1
 isaac-datagen-validate-obsmask = "isaac_datagen.validate_obsmask:main"
+# ingest30 (no Isaac): emit per-dataset render configs from the root manifest.
+isaac-datagen-ingest30-configs = "isaac_datagen.ingest30_configs:main"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
