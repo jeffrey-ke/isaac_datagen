@@ -2,7 +2,8 @@ import yaml
 
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_configs import (
-    base_config, pool_config, test_store_config, test_composed_config, write_all,
+    base_config, pool_config, test_store_config, test_composed_config,
+    smoke_config, write_all,
 )
 
 ARGS = dict(
@@ -84,3 +85,27 @@ def test_write_all(tmp_path):
     assert (root / "configs" / "datagen" / "smoke" / "snack031.yaml").exists()
     for p in written:                                    # every file is valid yaml
         yaml.safe_load(p.read_text())
+
+
+def test_composed_config_fields(tmp_path):
+    sa = sa_for(tmp_path)
+    all_classes = ["cereal001", "flour001", "sauces001", "snack031"]
+    cfg = test_composed_config(sa, all_classes)
+    assert cfg["seed"] == 3201                           # test seed, not base's 3001
+    assert cfg["num_targets"] == 4 and cfg["num_frames"] == 10
+    assert cfg["dataset_dir"].endswith("datasets/test/composed")
+    assert cfg["objects_path"] == [str(sa.base_catalog), str(sa.ingest_catalog)]
+    assert cfg["filter_specs"][0]["args"]["count"] == 3  # test_composed_replicas, not base_replicas
+    muts = cfg["scene_builder_args"]["mutations"]
+    for c in all_classes:
+        assert {"name": "DisablePhysics", "args": {"pattern": c}} in muts
+
+
+def test_smoke_config_fields(tmp_path):
+    sa = sa_for(tmp_path)
+    cfg = smoke_config(sa, "snack031")
+    assert cfg["dataset_dir"].endswith("smoke/snack031")
+    assert cfg["num_frames"] == 3
+    assert cfg["scene_builder"] == "build_store_scene"
+    assert cfg["filter_specs"][0]["args"]["value"] == "^(snack031)$"
+    assert cfg["seed"] == 3201
