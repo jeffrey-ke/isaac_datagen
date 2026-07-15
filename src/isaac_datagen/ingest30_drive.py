@@ -136,9 +136,10 @@ def _init_manifest(a) -> ScriptArgs:
     assert not (root / "datasets").exists(), \
         f"{root}/datasets exists — --force rebuilds catalogs+manifest only; stale renders " \
         "must be deleted by hand (exact paths) if the asset lists changed"
-    for stale in (root / "catalogs" / "base", root / "catalogs" / "ingest"):
+    for stale in (root / "catalogs" / "base", root / "catalogs" / "ingest",
+                  root / "flat_test", root / "configs" / "datagen"):
         if stale.exists():
-            shutil.rmtree(stale)   # tool-owned regenerable copies; exact names, no globs
+            shutil.rmtree(stale)   # tool-owned regenerables; exact names, no globs
     base_classes = assemble_catalog(base_assets, root / "catalogs" / "base")
     ingest_classes = assemble_catalog(ingest_assets, root / "catalogs" / "ingest")
     overlap = set(base_classes) & set(ingest_classes)

@@ -121,12 +121,16 @@ def test_init_force_semantics(tmp_path, monkeypatch):
         _init_manifest(a)
     (tmp_path / "datasets").rmdir()
 
-    for name in ("base", "ingest"):                    # (b) stale catalogs -> rebuilt
-        d = tmp_path / "catalogs" / name
+    stale_dirs = [tmp_path / "catalogs" / "base", tmp_path / "catalogs" / "ingest",
+                  tmp_path / "flat_test", tmp_path / "configs" / "datagen"]
+    for d in stale_dirs:                               # (b) tool-owned regenerables -> cleared
         d.mkdir(parents=True)
         (d / "stale.txt").write_text("old")
     sa = _init_manifest(a)
     assert assembled == ["base", "ingest"]
-    assert not (tmp_path / "catalogs" / "base" / "stale.txt").exists()
+    for d in stale_dirs:
+        assert not (d / "stale.txt").exists()
+    assert not (tmp_path / "flat_test").exists()       # flatten rebuilds it from new renders
+    assert not (tmp_path / "configs" / "datagen").exists()  # write_all regenerates (in run_init)
     assert (tmp_path / "manifest.yaml").exists()
     assert sa.base_classes == ["zebra"] and sa.ingest_classes == ["apple", "kiwi"]
