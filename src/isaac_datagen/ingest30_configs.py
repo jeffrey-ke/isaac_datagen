@@ -107,7 +107,10 @@ def pool_config(sa: ScriptArgs, cls: str) -> dict:
 def test_store_config(sa: ScriptArgs, classes: list[str]) -> dict:
     return _COMMON | _halo([0.3, 0.9], [-0.3, 0.3], [-0.2, 0.3]) | dict(
         seed=sa.seeds.test, idx=0,
-        num_targets=sa.test_store_num_targets, num_frames=sa.test_store_num_frames,
+        # <0 -> num_targets: null: capture aims at EVERY placed object (one frame each);
+        # a non-negative int random-subsamples that many targets instead (see capture.py).
+        num_targets=(None if sa.test_store_num_targets < 0 else sa.test_store_num_targets),
+        num_frames=sa.test_store_num_frames,
         dataset_dir=f"{sa.root}/datasets/test/store",
         scene_builder="build_repopulated_store_scene",
         scene_builder_args={

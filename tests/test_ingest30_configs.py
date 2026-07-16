@@ -174,6 +174,15 @@ def test_store_config_repopulates(tmp_path):
     assert cfg["objects_path"] == [str(sa.base_catalog), str(sa.ingest_catalog)]
 
 
+def test_store_config_num_targets_null(tmp_path):
+    sa = sa_for(tmp_path)
+    sa.test_store_num_targets = -1                       # sentinel: all placed objects are targets
+    cfg = test_store_config(sa, ["cereal001", "flour001", "sauces001", "snack031"])
+    assert cfg["num_targets"] is None                    # <0 -> null
+    sa.test_store_num_targets = 12
+    assert test_store_config(sa, [])["num_targets"] == 12  # non-negative passes through unchanged
+
+
 def test_write_all(tmp_path):
     sa = sa_for(tmp_path)
     written = write_all(sa)

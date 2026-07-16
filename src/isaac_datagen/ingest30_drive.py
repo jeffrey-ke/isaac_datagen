@@ -327,7 +327,8 @@ def _parser() -> argparse.ArgumentParser:
                      help="ReplicateFilter count for the store leg; "
                           "default fills as many of the S sites as fit (S // M)")
     ini.add_argument("--test-store-num-targets", type=int, default=20,
-                     help="camera vantage points per store dir (default: %(default)s)")
+                     help="camera vantage points per store dir; <0 -> null = every placed "
+                          "object, one frame each (default: %(default)s)")
     ini.add_argument("--force", action="store_true",
                      help="rebuild tool-owned regenerables (catalogs/{base,ingest}, flat_test, "
                           "configs/datagen); refuses if datasets/ exists -- delete stale "
