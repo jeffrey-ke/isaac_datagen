@@ -18,7 +18,8 @@ _COMMON = dict(
     descriptor_config_path=f"{_REFMATCH}/descriptor.yaml",
     proposer_min_visible_ratio=0.30,
     set_exposure=True, exposure_time=1.0, f_number=5.0, film_iso=100.0,
-    rt_subframes=20, warmup_frames=32,
+    rt_subframes=10, warmup_frames=32,          # render speed (validated ~identical to spp256/rt20/bounces12)
+    path_tracing_spp=96, path_tracing_max_bounces=6,
 )
 
 _JITTERED_LIGHTS = dict(
