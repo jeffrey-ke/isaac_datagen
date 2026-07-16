@@ -74,7 +74,7 @@ def stage_flatten(sa: ScriptArgs) -> list[Cmd]:
 
 INIT_STAGES = {"render": stage_render, "bake": stage_bake,
                "squash": stage_squash, "flatten": stage_flatten}
-GPU_STAGES = {"render"}   # bake/squash/flatten read baked products; arm/score/smoke check inline
+GPU_STAGES = {"render"}   # bake/squash/flatten read baked products; arm/score check inline
 
 
 def arm_commands(root, ops, base_cfg, ingest_cfg, label, all_data, allow_dirty) -> list[Cmd]:
@@ -94,14 +94,6 @@ def arm_commands(root, ops, base_cfg, ingest_cfg, label, all_data, allow_dirty) 
 def score_commands(root, label, protocol, steps) -> list[Cmd]:
     extra = ["--steps", steps] if steps else []
     return [_seg("ingest30-score", root, label, "--protocol", protocol, *extra)]
-
-
-def smoke_commands(root) -> list[Cmd]:
-    # smoke cfg paths (zed_K.npy, ../../../usds/store001.usd) are relative to
-    # src/isaac_datagen; the inner render subprocess inherits this cwd
-    return [Cmd(["uv", "run", "isaac-datagen-ingest30-smoke",
-                 str(Path(root) / "manifest.yaml")],
-                WS / "isaac_datagen" / "src" / "isaac_datagen", drop_pythonpath=True)]
 
 
 def run_cmd(cmd: Cmd, log) -> None:
@@ -181,6 +173,14 @@ def _init_manifest(a) -> ScriptArgs:
     pool_object_radius = {}
     if a.pool_poser == "DecenteredLookAtPoser":
         pool_object_radius = compute_pool_object_radii(root / "catalogs" / "ingest")
+    from isaac_datagen.asset_catalogs import catalog_meta
+    site_catalog = str(Path(a.store_site_catalog).resolve())
+    n_sites = len(catalog_meta(Path(site_catalog)))
+    m = len(base_classes) + len(ingest_classes)
+    replicas = a.test_store_replicas if a.test_store_replicas is not None else n_sites // m
+    assert replicas >= 1, (
+        f"{m} classes vs {n_sites} store sites: no room to fill even one per class — "
+        f"use fewer classes or a larger site catalog")
     sa = ScriptArgs(
         root=str(root), base_assets=base_assets, ingest_assets=ingest_assets,
         base_classes=base_classes, ingest_classes=ingest_classes,
@@ -193,6 +193,9 @@ def _init_manifest(a) -> ScriptArgs:
         test_composed_num_targets=a.test_composed_num_targets,
         test_composed_num_frames=a.test_composed_num_frames,
         test_composed_replicas=a.test_composed_replicas,
+        store_site_catalog=site_catalog,
+        test_store_replicas=replicas,
+        test_store_num_targets=a.test_store_num_targets,
         pool_poser=a.pool_poser, pool_object_radius=pool_object_radius,
         pool_offset_sampler=pool_offset_sampler,
     )
@@ -237,13 +240,7 @@ def run_score(a) -> None:
     run_stage("score", a.label, score_commands(a.root, a.label, a.protocol, a.steps), a.root)
 
 
-def run_smoke(a) -> None:
-    assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
-    subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"])
-    run_stage("smoke", "store", smoke_commands(a.root), a.root)
-
-
-VERBS = {"init": run_init, "arm": run_arm, "score": run_score, "smoke": run_smoke}
+VERBS = {"init": run_init, "arm": run_arm, "score": run_score}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -251,7 +248,7 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="meta", **raw,
         description=(
-            "ingest30 experiment driver: init -> smoke -> arm -> score.\n\n"
+            "ingest30 experiment driver: init -> arm -> score.\n\n"
             "Run from isaac_datagen/ as `uv run meta ...`. Output appends to\n"
             "<root>/logs/<verb>-<stage>.log. Every verb except init needs an inited\n"
             "root (<root>/manifest.yaml). GPU verbs print nvidia-smi memory used\n"
@@ -262,7 +259,6 @@ def _parser() -> argparse.ArgumentParser:
             "  meta init base.txt ingest.txt <root> --descriptor CleanDiftFpn \\\n"
             "      --descriptor-config ../reference_matching/src/reference_matching/"
             "configs/fpn_cleandift_123.yaml\n"
-            "  meta smoke <root>\n"
             "  meta arm gligen src/segmentation/configs/ingest30/base-train-gligen.yaml \\\n"
             "      src/segmentation/configs/ingest30/ingest-gligen.yaml <root> --allow-dirty\n"
             "  meta arm retrained src/segmentation/configs/ingest30/base-train-closed.yaml"
@@ -319,6 +315,15 @@ def _parser() -> argparse.ArgumentParser:
                      help="must equal the `name:` inside --descriptor-config (asserted)")
     ini.add_argument("--descriptor-config", required=True,
                      help="descriptor bake config, path relative to isaac_datagen/")
+    ini.add_argument("--store-site-catalog",
+                     default=str(WS / "isaac_datagen" / "assets" / "optflow_objects"
+                                 / "store001-optflow-objects-keep"),
+                     help="curated store site catalog (default: store001-optflow-objects-keep)")
+    ini.add_argument("--test-store-replicas", type=int, default=None,
+                     help="ReplicateFilter count for the store leg; "
+                          "default fills as many of the S sites as fit (S // M)")
+    ini.add_argument("--test-store-num-targets", type=int, default=20,
+                     help="camera vantage points per store dir (default: %(default)s)")
     ini.add_argument("--force", action="store_true",
                      help="rebuild tool-owned regenerables (catalogs/{base,ingest}, flat_test, "
                           "configs/datagen); refuses if datasets/ exists -- delete stale "
@@ -406,16 +411,6 @@ def _parser() -> argparse.ArgumentParser:
     sco.add_argument("--steps", default=None,
                      help="comma-separated step tags to score, e.g. base,00,05 (default: all)")
 
-    smo = sub.add_parser(
-        "smoke", **raw,
-        help="store grasp-frame gate; run BEFORE trusting the full test render",
-        description=(
-            "Render 3 store frames per class and tally grasp-frame coverage into\n"
-            "<root>/smoke/report.csv (zero-frame classes are called out). Run BEFORE\n"
-            "the full test render at real scale."
-        ),
-    )
-    smo.add_argument("root")
     return p
 
 

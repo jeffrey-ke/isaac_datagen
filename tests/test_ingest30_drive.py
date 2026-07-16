@@ -7,7 +7,7 @@ import yaml
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_drive import (
     VERBS, _init_manifest, _unpack_arm_positionals, arm_commands, parse_args,
-    score_commands, smoke_commands, stage_bake, stage_flatten, stage_render,
+    score_commands, stage_bake, stage_flatten, stage_render,
 )
 
 MANIFEST = dict(
@@ -19,6 +19,7 @@ MANIFEST = dict(
     pool_frames=3, test_store_num_frames=1,
     test_composed_num_dirs=1, test_composed_num_targets=1,
     test_composed_num_frames=1, test_composed_replicas=1,
+    store_site_catalog="/data/keep", test_store_replicas=9, test_store_num_targets=20,
 )
 
 
@@ -91,7 +92,7 @@ def test_flatten_commands(tmp_path):
 
 
 def test_verb_registry_complete():
-    assert list(VERBS) == ["init", "arm", "score", "smoke"]
+    assert list(VERBS) == ["init", "arm", "score"]
 
 
 def test_arm_cli_parsing():
@@ -122,11 +123,19 @@ def test_arm_cli_parsing():
         _unpack_arm_positionals(a.args_)
 
 
-def test_smoke_commands():
-    (cmd,) = smoke_commands("/r")
-    assert cmd.argv[-1].endswith("manifest.yaml")
-    assert str(cmd.cwd).endswith("src/isaac_datagen")  # smoke cfg paths are relative to here
-    assert cmd.drop_pythonpath                         # Isaac needs clean env
+def test_init_parser_accepts_store_site_flags():
+    a = parse_args(["init", "b.txt", "i.txt", "/tmp/root",
+                    "--descriptor", "CleanDiftFpn", "--descriptor-config", "d.yaml",
+                    "--store-site-catalog", "/data/keep",
+                    "--test-store-replicas", "7", "--test-store-num-targets", "15"])
+    assert a.store_site_catalog == "/data/keep"
+    assert a.test_store_replicas == 7
+    assert a.test_store_num_targets == 15
+
+
+def test_no_smoke_verb():
+    with pytest.raises(SystemExit):                 # 'smoke' subparser is gone
+        parse_args(["smoke", "/tmp/root"])
 
 
 def test_init_force_semantics(tmp_path, monkeypatch):
@@ -142,6 +151,7 @@ def test_init_force_semantics(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
     monkeypatch.setattr(ac, "assemble_catalog", fake_assemble)
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
 
     bake_cfg = tmp_path / "fpn.yaml"                    # absolute -> WS join keeps it as-is
     bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
@@ -155,6 +165,7 @@ def test_init_force_semantics(tmp_path, monkeypatch):
         pool_frames=3, test_store_num_frames=1,
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None, test_store_num_targets=20,
     )
 
     (tmp_path / "datasets").mkdir()                    # (a) renders present -> refuse
@@ -179,9 +190,15 @@ def test_init_force_semantics(tmp_path, monkeypatch):
 
 def test_init_descriptor_bake_config_mismatch(tmp_path, monkeypatch):
     import isaac_datagen.asset_catalogs as ac
+
+    def fake_assemble(paths, dest):
+        dest = Path(dest)
+        dest.mkdir(parents=True)
+        return {"base": ["zebra"], "ingest": ["apple"]}[dest.name]  # non-overlapping, m=2
+
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
-    monkeypatch.setattr(ac, "assemble_catalog",
-                        lambda paths, dest: Path(dest).mkdir(parents=True) or [])
+    monkeypatch.setattr(ac, "assemble_catalog", fake_assemble)
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
 
     bake_cfg = tmp_path / "fpn.yaml"
     bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
@@ -196,6 +213,8 @@ def test_init_descriptor_bake_config_mismatch(tmp_path, monkeypatch):
             pool_frames=3, test_store_num_frames=1,
             test_composed_num_dirs=1, test_composed_num_targets=1,
             test_composed_num_frames=1, test_composed_replicas=1,
+            store_site_catalog=str(tmp_path), test_store_replicas=None,
+            test_store_num_targets=20,
         )
 
     with pytest.raises(AssertionError, match="descriptor 'E' != bake config .* name 'D'"):

@@ -64,8 +64,6 @@ isaac-datagen-measure-luminance = "isaac_datagen.measure_luminance:main"
 isaac-datagen-validate-obsmask = "isaac_datagen.validate_obsmask:main"
 # ingest30 (no Isaac): emit per-dataset render configs from the root manifest.
 isaac-datagen-ingest30-configs = "isaac_datagen.ingest30_configs:main"
-# ingest30 (Isaac, tesu): render 3-frame store smokes per class; tally drop rates.
-isaac-datagen-ingest30-smoke = "isaac_datagen.ingest30_smoke:main"
 # ingest30: `meta` verb CLI — init the artifact root, run arms, score labels.
 meta = "isaac_datagen.ingest30_drive:main"
 
