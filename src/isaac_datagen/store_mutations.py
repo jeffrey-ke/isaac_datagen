@@ -86,7 +86,34 @@ class ProductSite:
     grasp: np.ndarray
 
 
-def measure_site(stage, prim, policy) -> ProductSite:
+@dataclass(frozen=True)
+class Site:
+    store_prim: str          # "<product>/v_0", relative to the store root; resolves to the geometry prim
+    grasp: np.ndarray        # curated grasp_point SE3 of the object that sat here
+    cls: str
+
+
+def load_sites(site_catalog) -> list[Site]:
+    """Curated shelf sites from a store-extracted OptFlowObject catalog.
+
+    Each object contributes (store_prim, curated grasp_point, class). Fails loud if
+    handed a non-store catalog (objects without store_prim)."""
+    from isaac_datagen.asset_catalogs import catalog_meta
+    metas = catalog_meta(Path(site_catalog))     # sorted meta_*.yaml -> dicts
+    sites = []
+    for i, m in enumerate(metas):
+        assert "store_prim" in m, (
+            f"site catalog {site_catalog}: object {m.get('name', i)!r} has no store_prim "
+            f"— not a store-extracted catalog; only store001-optflow-objects-keep-style "
+            f"catalogs define shelf sites")
+        grasp = OptFlowObject.deserialize_field(i, Path(site_catalog), "grasp_point")
+        sites.append(Site(store_prim=m["store_prim"], grasp=np.asarray(grasp), cls=m["class"]))
+    return sites
+
+
+def measure_site(stage, prim, grasp_fn) -> ProductSite:
+    # grasp_fn(lo, hi, cls) -> 4x4 SE3. ReplaceClass passes a bbox-face policy; repopulation
+    # passes a constant fn returning the curated grasp (site geometry read once, either way).
     from isaac_datagen.capture import get_target2world
     from isaac_datagen.isaac_utils import untransformed_bbox_range
     name, cls = parse_sku(prim.GetName())
@@ -94,7 +121,7 @@ def measure_site(stage, prim, policy) -> ProductSite:
     assert stage.GetPrimAtPath(v0_path).IsValid(), f"no v_0 under {prim.GetPath()}"
     lo, hi = _bbox(untransformed_bbox_range(stage.GetPrimAtPath(v0_path)))
     return ProductSite(name=name, path=prim.GetPath().pathString, lo=lo, hi=hi,
-                       l2w=get_target2world([v0_path])[0], grasp=policy(lo, hi, cls))
+                       l2w=get_target2world([v0_path])[0], grasp=grasp_fn(lo, hi, cls))
 
 
 def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r) -> np.ndarray:
@@ -116,6 +143,28 @@ def insert_replacement(stage, src: OptFlowObject, site: ProductSite) -> CaptureT
     lo_r, hi_r = _bbox(untransformed_bbox_range(stage.GetPrimAtPath(wrapper)))
     set_prim_pose(wrapper, replacement_pose(site, lo_r, hi_r, src.grasp_point))
     return CaptureTarget(dataclasses.replace(src, meta={**src.meta, "name": name}), wrapper)
+
+
+def replace_instance(stage, store, store_prim: str, src: OptFlowObject, grasp) -> CaptureTarget:
+    """Repopulation atom: put `src` at the curated site addressed by `store_prim`,
+    aligning src's own grasp to the site's curated `grasp`. Deactivates the native product."""
+    from isaac_datagen.isaac_utils import deactivate_prim
+    v0 = stage.GetPrimAtPath(store.GetPath().AppendPath(store_prim))
+    assert v0.IsValid() and v0.IsActive(), f"store site prim gone/inactive: {store_prim}"
+    product = v0.GetParent()                          # store_prim is "<product>/v_0"
+    site = measure_site(stage, product, lambda lo, hi, cls: np.asarray(grasp))
+    deactivate_prim(product)
+    return insert_replacement(stage, src, site)
+
+
+def deactivate_remaining_products(store, spec) -> int:
+    """Strip every store product still active after repopulation (unused sites + non-catalog SKUs)."""
+    from isaac_datagen.isaac_utils import deactivate_prim
+    removed = [p.GetPath().pathString for p in active_products(store, spec.product_patterns)]
+    for p in active_products(store, spec.product_patterns):
+        deactivate_prim(p)
+    print(f"[MUT] repopulate: deactivated {len(removed)} non-repopulated product(s)", flush=True)
+    return len(removed)
 
 
 class RemoveClass:
