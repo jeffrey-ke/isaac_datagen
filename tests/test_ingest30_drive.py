@@ -7,7 +7,7 @@ import yaml
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_drive import (
     VERBS, _init_manifest, _unpack_arm_positionals, arm_commands, parse_args,
-    score_commands, smoke_commands, stage_bake, stage_render,
+    score_commands, smoke_commands, stage_bake, stage_flatten, stage_render,
 )
 
 MANIFEST = dict(
@@ -63,6 +63,7 @@ def test_arm_commands_two_phase():
     assert "ingest30-base-train /r gligen b.yaml --label gligen" in joined[0]
     assert "ingest30-loop /r gligen i.yaml --label gligen" in joined[1]
     assert all("--allow-dirty" in j for j in joined)
+    assert all(c.drop_pythonpath for c in cmds)                # segmentation needs clean env
 
 
 def test_arm_retrained_maps_to_closed():
@@ -71,6 +72,7 @@ def test_arm_retrained_maps_to_closed():
     (cmd,) = cmds                                              # base-train ONLY, no loop
     j = " ".join(cmd.argv)
     assert "ingest30-base-train /r closed r.yaml --label retrained --all-data" in j
+    assert cmd.drop_pythonpath                                 # segmentation needs clean env
     with pytest.raises(AssertionError, match="retrained"):
         arm_commands("/r", "retrained", "r.yaml", "i.yaml",
                      label=None, all_data=True, allow_dirty=False)
@@ -79,6 +81,13 @@ def test_arm_retrained_maps_to_closed():
 def test_score_commands():
     (cmd,) = score_commands("/r", "gligen", "solo", steps=None)
     assert " ".join(cmd.argv).endswith("ingest30-score /r gligen --protocol solo")
+    assert cmd.drop_pythonpath                                 # segmentation needs clean env
+
+
+def test_flatten_commands(tmp_path):
+    (cmd,) = stage_flatten(sa_(tmp_path))
+    assert " ".join(cmd.argv).endswith(f"ingest30-flatten {tmp_path}")
+    assert cmd.drop_pythonpath                                 # segmentation needs clean env
 
 
 def test_verb_registry_complete():
@@ -134,9 +143,12 @@ def test_init_force_semantics(tmp_path, monkeypatch):
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
     monkeypatch.setattr(ac, "assemble_catalog", fake_assemble)
 
+    bake_cfg = tmp_path / "fpn.yaml"                    # absolute -> WS join keeps it as-is
+    bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
+
     a = argparse.Namespace(
         root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
-        descriptor="D", descriptor_config="/refmatch/fpn.yaml",
+        descriptor="D", descriptor_config=str(bake_cfg),
         seed_base=1, seed_pools=2, seed_test=3,
         base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
         pool_frames=3, test_store_num_frames=1,
@@ -162,3 +174,30 @@ def test_init_force_semantics(tmp_path, monkeypatch):
     assert not (tmp_path / "configs" / "datagen").exists()  # write_all regenerates (in run_init)
     assert (tmp_path / "manifest.yaml").exists()
     assert sa.base_classes == ["zebra"] and sa.ingest_classes == ["apple", "kiwi"]
+
+
+def test_init_descriptor_bake_config_mismatch(tmp_path, monkeypatch):
+    import isaac_datagen.asset_catalogs as ac
+    monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "assemble_catalog",
+                        lambda paths, dest: Path(dest).mkdir(parents=True) or [])
+
+    bake_cfg = tmp_path / "fpn.yaml"
+    bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
+
+    def a_(descriptor):
+        return argparse.Namespace(
+            root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
+            descriptor=descriptor, descriptor_config=str(bake_cfg),
+            seed_base=1, seed_pools=2, seed_test=3,
+            base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+            pool_frames=3, test_store_num_frames=1,
+            test_composed_num_dirs=1, test_composed_num_targets=1,
+            test_composed_num_frames=1, test_composed_replicas=1,
+        )
+
+    with pytest.raises(AssertionError, match="descriptor 'E' != bake config .* name 'D'"):
+        _init_manifest(a_("E"))                        # mismatch -> fail loud before any I/O
+
+    sa = _init_manifest(a_("D"))                        # matching name -> proceeds
+    assert sa.descriptor == "D"

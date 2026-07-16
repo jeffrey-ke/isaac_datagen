@@ -30,7 +30,10 @@ def _dgen(*argv: str) -> Cmd:
 
 
 def _seg(*argv: str) -> Cmd:
-    return Cmd(["uv", "run", *argv], WS / "segmentation")
+    # segmentation never wants Isaac's env: if meta is launched from an
+    # Isaac-sourced shell, an inherited PYTHONPATH could pull in Isaac's
+    # torch 2.7 instead of segmentation's own venv's torch 2.11
+    return Cmd(["uv", "run", *argv], WS / "segmentation", drop_pythonpath=True)
 
 
 def _rendered(cfg: Path, idx: int) -> bool:
@@ -126,6 +129,15 @@ def _init_manifest(a) -> ScriptArgs:
 
     root = Path(a.root)
     manifest = root / "manifest.yaml"
+    # descriptor_config resolves like stage_bake's add-backbone consumes it: relative
+    # to WS/isaac_datagen. Mismatch here would otherwise surface as a KeyError at
+    # flatten/train — checked on both fresh init and resume.
+    bake_cfg_name = yaml.safe_load(
+        (WS / "isaac_datagen" / a.descriptor_config).read_text())["name"]
+    assert bake_cfg_name == a.descriptor, (
+        f"--descriptor {a.descriptor!r} != bake config {a.descriptor_config!r} "
+        f"name {bake_cfg_name!r}"
+    )
     base_assets = read_asset_list(a.base_assets)
     ingest_assets = read_asset_list(a.ingest_assets)
     if manifest.exists() and not a.force:
