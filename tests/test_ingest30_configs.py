@@ -4,7 +4,7 @@ import pytest
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_configs import (
     base_config, pool_config, test_store_config, test_composed_config,
-    smoke_config, write_all, POOL_POSERS,
+    write_all, POOL_POSERS,
 )
 
 ARGS = dict(
@@ -19,6 +19,8 @@ ARGS = dict(
     pool_frames=100, test_store_num_frames=5,
     test_composed_num_dirs=1, test_composed_num_targets=4,
     test_composed_num_frames=10, test_composed_replicas=3,
+    store_site_catalog="",              # filled per test by sa_for
+    test_store_replicas=2, test_store_num_targets=20,
 )
 
 
@@ -30,13 +32,26 @@ def fake_assembled(root, name, classes):
             {"name": c, "class": c, "store_prim": f"model_{c}/v_0"}))
 
 
-def sa_for(tmp_path):
+def fake_site_catalog(root, n):
+    import numpy as np
+    meta = root / "sites" / "meta"
+    gp = root / "sites" / "grasp_point"
+    meta.mkdir(parents=True); gp.mkdir(parents=True)
+    for i in range(n):
+        (meta / f"meta_{i:04d}.yaml").write_text(yaml.safe_dump(
+            {"name": f"s{i:03d}", "class": f"s{i:03d}", "store_prim": f"model_s{i:03d}/v_0"}))
+        np.save(gp / f"grasp_point_{i:04d}.npy", np.eye(4, dtype=np.float32))
+    return root / "sites"
+
+
+def sa_for(tmp_path, n_sites=10):
     import copy
     d = copy.deepcopy(ARGS)
     root = tmp_path / "root"
     d["root"] = str(root)
     fake_assembled(root, "base", ["cereal001", "sauces001"])
     fake_assembled(root, "ingest", ["snack031", "flour001"])
+    d["store_site_catalog"] = str(fake_site_catalog(root, n_sites))
     p = tmp_path / "manifest.yaml"
     p.write_text(yaml.safe_dump(d))
     return ScriptArgs.load(p)
@@ -145,14 +160,17 @@ def test_base_config(tmp_path):
     assert {"name": "DisablePhysics", "args": {"pattern": "cereal001*"}} in muts
 
 
-def test_store_config_covers_all_classes(tmp_path):
+def test_store_config_repopulates(tmp_path):
     sa = sa_for(tmp_path)
     cfg = test_store_config(sa, ["cereal001", "flour001", "sauces001", "snack031"])
     assert cfg["seed"] == 3201
-    assert cfg["scene_builder"] == "build_store_scene"
-    v = cfg["filter_specs"][0]["args"]["value"]
-    assert v == "^(cereal001|flour001|sauces001|snack031)$"
-    assert cfg["scene_builder_args"]["mutations"] == [{"name": "RemoveUntrackedProducts"}]
+    assert cfg["scene_builder"] == "build_repopulated_store_scene"
+    assert cfg["scene_builder_args"]["site_catalog"] == sa.store_site_catalog
+    assert cfg["scene_builder_args"]["mutations"] == []          # repopulation, not RemoveUntrackedProducts
+    assert cfg["num_targets"] == 20
+    names = [f["name"] for f in cfg["filter_specs"]]
+    assert names == ["ReplicateFilter", "ShuffleFilter"]         # balance + order, no RegexFilter
+    assert cfg["filter_specs"][0]["args"]["count"] == sa.test_store_replicas
     assert cfg["objects_path"] == [str(sa.base_catalog), str(sa.ingest_catalog)]
 
 
@@ -160,13 +178,27 @@ def test_write_all(tmp_path):
     sa = sa_for(tmp_path)
     written = write_all(sa)
     names = {p.name for p in written}
-    assert {"base.yaml", "pool-snack031.yaml", "pool-flour001.yaml",
-            "test-store.yaml", "test-composed.yaml"} <= names
+    assert names == {"base.yaml", "pool-snack031.yaml", "pool-flour001.yaml",
+                      "test-store.yaml", "test-composed.yaml"}
     root = tmp_path / "root"
     assert (root / "datasets" / "pools" / "snack031-1inst").is_dir()
-    assert (root / "configs" / "datagen" / "smoke" / "snack031.yaml").exists()
     for p in written:                                    # every file is valid yaml
         yaml.safe_load(p.read_text())
+
+
+def test_write_all_no_smoke_configs(tmp_path):
+    sa = sa_for(tmp_path)              # M=4 classes, n_sites=10, replicate=2 -> 8 <= 10 OK
+    write_all(sa)
+    out = tmp_path / "root" / "configs" / "datagen"
+    assert (out / "test-store.yaml").exists()
+    assert not (out / "smoke").exists()          # smoke configs no longer written
+
+
+def test_write_all_site_cap_violation(tmp_path):
+    import pytest
+    sa = sa_for(tmp_path, n_sites=6)             # M=4 classes, replicate=2 -> 8 > 6 -> refuse
+    with pytest.raises(AssertionError, match="exceeds the 6 curated store sites"):
+        write_all(sa)
 
 
 def test_composed_config_fields(tmp_path):
@@ -181,16 +213,6 @@ def test_composed_config_fields(tmp_path):
     muts = cfg["scene_builder_args"]["mutations"]
     for c in all_classes:
         assert {"name": "DisablePhysics", "args": {"pattern": f"{c}*"}} in muts
-
-
-def test_smoke_config_fields(tmp_path):
-    sa = sa_for(tmp_path)
-    cfg = smoke_config(sa, "snack031")
-    assert cfg["dataset_dir"].endswith("smoke/snack031")
-    assert cfg["num_frames"] == 3
-    assert cfg["scene_builder"] == "build_store_scene"
-    assert cfg["filter_specs"][0]["args"]["value"] == "^(snack031)$"
-    assert cfg["seed"] == 3201
 
 
 _ORIENTATION = {"name": "AlignGraspFronts", "args": {"azimuth_deg": -90}}

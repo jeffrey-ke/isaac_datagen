@@ -104,19 +104,21 @@ def pool_config(sa: ScriptArgs, cls: str) -> dict:
     )
 
 
-def _store_config(sa: ScriptArgs, classes: list[str], dataset_dir: str, num_frames: int) -> dict:
-    alternation = "^(" + "|".join(sorted(classes)) + ")$"
+def test_store_config(sa: ScriptArgs, classes: list[str]) -> dict:
     return _COMMON | _halo([0.3, 0.9], [-0.3, 0.3], [-0.2, 0.3]) | dict(
         seed=sa.seeds.test, idx=0,
-        num_targets=None, num_frames=num_frames,
-        dataset_dir=dataset_dir,
-        scene_builder="build_store_scene",
+        num_targets=sa.test_store_num_targets, num_frames=sa.test_store_num_frames,
+        dataset_dir=f"{sa.root}/datasets/test/store",
+        scene_builder="build_repopulated_store_scene",
         scene_builder_args={
             "store_usd": "../../../usds/store001.usd",
             "product_patterns": PRODUCT_PATTERNS,
+            # grasp_frame_policy is required by StoreSceneSpec but UNUSED by repopulation
+            # (sites carry their own curated grasp); supply a valid dummy.
             "grasp_frame_policy": "FixedFaceGrasp",
             "grasp_frame_policy_args": {"face": "-Y"},
-            "mutations": [{"name": "RemoveUntrackedProducts"}],
+            "site_catalog": sa.store_site_catalog,
+            "mutations": [],
             "require_tracked_only": PRODUCT_PATTERNS,
         },
         dome_light=False, distant_light=False,
@@ -124,19 +126,13 @@ def _store_config(sa: ScriptArgs, classes: list[str], dataset_dir: str, num_fram
                                 "intensity_scale_range": [0.25, 8.0]}],
         placement="UntilExhaustedStacker", placement_args={},
         objects_path=[str(sa.base_catalog), str(sa.ingest_catalog)],
-        filter_specs=[{"name": "RegexFilter",
-                       "args": {"key": "class", "value": alternation}}],
+        filter_specs=[
+            {"name": "ReplicateFilter",
+             "args": {"key": "name", "value": "*", "count": sa.test_store_replicas}},
+            {"name": "ShuffleFilter", "args": {"seed": "${idx}"}},
+        ],
     )
-
-
-def test_store_config(sa: ScriptArgs, all_classes: list[str]) -> dict:
-    return _store_config(sa, all_classes, f"{sa.root}/datasets/test/store",
-                         sa.test_store_num_frames)
 test_store_config.__test__ = False   # builder, not a pytest test, despite the name
-
-
-def smoke_config(sa: ScriptArgs, cls: str) -> dict:
-    return _store_config(sa, [cls], f"{sa.root}/smoke/{cls}", 3)
 
 
 def test_composed_config(sa: ScriptArgs, all_classes: list[str]) -> dict:
@@ -156,6 +152,7 @@ test_composed_config.__test__ = False   # builder, not a pytest test, despite th
 
 
 def write_all(sa: ScriptArgs) -> list[Path]:
+    from isaac_datagen.asset_catalogs import catalog_meta
     base_classes, ingest_classes = list(sa.base_classes), list(sa.ingest_classes)
     overlap = set(base_classes) & set(ingest_classes)
     assert not overlap, f"base/ingest share classes: {sorted(overlap)}"
@@ -165,21 +162,27 @@ def write_all(sa: ScriptArgs) -> list[Path]:
         "manifest ingest_classes drifted from assembled catalog"
     all_classes = sorted(base_classes + ingest_classes)
 
+    n_sites = len(catalog_meta(sa.site_catalog))
+    m = len(all_classes)
+    assert m * sa.test_store_replicas <= n_sites, (
+        f"store repopulation: {m} classes x replicate {sa.test_store_replicas} = "
+        f"{m * sa.test_store_replicas} objects exceeds the {n_sites} curated store sites. "
+        f"Reduce --test-store-replicas to <= {n_sites // m}, or place overflow via the "
+        f"composed scene (no fixed-site limit).")
+
     out = Path(sa.root) / "configs" / "datagen"
-    (out / "smoke").mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     configs: dict[Path, dict] = {out / "base.yaml": base_config(sa, base_classes),
                                  out / "test-store.yaml": test_store_config(sa, all_classes),
                                  out / "test-composed.yaml": test_composed_config(sa, all_classes)}
     for cls in ingest_classes:
         configs[out / f"pool-{cls}.yaml"] = pool_config(sa, cls)
-    for cls in all_classes:
-        configs[out / "smoke" / f"{cls}.yaml"] = smoke_config(sa, cls)
 
     for path, cfg in configs.items():
         Path(cfg["dataset_dir"]).mkdir(parents=True, exist_ok=True)   # dataset_dir MUST pre-exist
         path.write_text(yaml.safe_dump(cfg, sort_keys=False))
-    print(f"[ingest30-configs] N={len(base_classes)} M={len(all_classes)} "
-          f"-> {len(configs)} configs under {out}")
+    print(f"[ingest30-configs] N={len(base_classes)} M={m} store-sites={n_sites} "
+          f"replicate={sa.test_store_replicas} -> {len(configs)} configs under {out}")
     return sorted(configs)
 
 
