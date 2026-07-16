@@ -41,3 +41,25 @@ def test_registry():
 def test_align_requires_azimuth():
     with pytest.raises(TypeError):
         orientations.AlignGraspFronts()  # azimuth_deg is required, no default
+
+
+def test_plain_scene_spec_accepts_orientation():
+    from isaac_datagen.scene import PlainSceneSpec
+    spec = PlainSceneSpec(orientation={"name": "AlignGraspFronts",
+                                       "args": {"azimuth_deg": -90}})
+    assert spec.orientation["name"] == "AlignGraspFronts"
+
+
+def test_plain_scene_spec_default_is_none():
+    from isaac_datagen.scene import PlainSceneSpec
+    assert PlainSceneSpec().orientation is None
+
+
+def test_plain_scene_spec_rejects_bad_orientation():
+    from isaac_datagen.scene import PlainSceneSpec
+    with pytest.raises(KeyError):
+        PlainSceneSpec(orientation={"name": "NoSuchPolicy"})
+    with pytest.raises(TypeError):
+        PlainSceneSpec(orientation={"name": "AlignGraspFronts"})  # missing azimuth_deg
+    with pytest.raises(AssertionError):
+        PlainSceneSpec(orientation={"policy": "AlignGraspFronts"})  # wrong shape

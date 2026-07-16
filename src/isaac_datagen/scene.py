@@ -76,12 +76,16 @@ def organize_objects(policy: Callable, prim_paths: List[str]):
         set_transform(stage.GetPrimAtPath(prim_path), translation=translation, rotation=rotation)
 
 
-def create_stack_of_objects(parent_path, objects: List[GraspableObject], runtime):
+def create_stack_of_objects(parent_path, objects: List[GraspableObject], runtime, orientation=None):
     from isaacsim.core.utils.prims import create_prim
+    from isaac_datagen import orientations
     stack_prim = create_prim(f"{parent_path}/stack", "Xform")
     stack_path = stack_prim.GetPath().pathString
 
     prim_paths_added = [add_object(at_parent=stack_path, obj=o) for o in objects]
+    if orientation is not None:
+        orient = orientations.get(orientation["name"])(**orientation.get("args", {}))
+        orient(prim_paths_added, objects)
     policy = placers.get(runtime.placement)(prim_paths_added, **runtime.placement_args)
 
     organize_objects(policy=policy, prim_paths=prim_paths_added)
@@ -389,7 +393,7 @@ def _bbox_grasp_frame(path, obj):
 
 def _catalog_grasp_frame(path, obj):
     from isaac_datagen.store_scene import add_catalog_grasp_frame  # lazy (import cycle)
-    return add_catalog_grasp_frame(path, obj)
+    return add_catalog_grasp_frame(f"{path}/geo", obj)
 
 
 GRASP_FRAME_SOURCES = {"bbox": _bbox_grasp_frame, "catalog": _catalog_grasp_frame}
@@ -399,6 +403,7 @@ GRASP_FRAME_SOURCES = {"bbox": _bbox_grasp_frame, "catalog": _catalog_grasp_fram
 class PlainSceneSpec:
     mutations: list = field(default_factory=list)  # unknown keys -> TypeError (fail loud)
     grasp_frames: str = "bbox"  # "catalog" replays the Stage-A baked grasp_point
+    orientation: dict = None    # {name, args?} -> orientations registry; None = keep canonical yaw
 
     def __post_init__(self):
         from isaac_datagen import store_mutations  # lazy: store_mutations->extract_store_objects->scene cycle
@@ -409,6 +414,12 @@ class PlainSceneSpec:
                 f"mutation spec must be {{name, args?}}: {m!r}"
             assert getattr(store_mutations.get(m["name"]), "PLAIN_SAFE", False), \
                 f"mutation {m['name']!r} is store-only (reads StoreSceneSpec fields)"
+        if self.orientation is not None:
+            from isaac_datagen import orientations
+            assert isinstance(self.orientation, dict) and self.orientation.get("name") \
+                and set(self.orientation) <= {"name", "args"}, \
+                f"orientation spec must be {{name, args?}}: {self.orientation!r}"
+            orientations.get(self.orientation["name"])(**self.orientation.get("args", {}))
 
 
 def apply_plain_mutations(stack_path, spec, objects, objects_paths, effective_seed):
@@ -448,6 +459,7 @@ def build_scene(runtime, objects: List[GraspableObject]):
         parent_path,
         objects,
         runtime,
+        orientation=spec.orientation,
     )
     objects = apply_plain_mutations(stack_path, spec, objects, objects_paths, runtime.effective_seed)
 
