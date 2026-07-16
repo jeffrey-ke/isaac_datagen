@@ -115,6 +115,8 @@ def build_repopulated_store_scene(runtime, objects) -> SceneHandle:
     the sites in order, insert each anchored to the site's curated grasp, strip the rest."""
     spec = StoreSceneSpec(**runtime.scene_builder_args)
     assert spec.site_catalog, "build_repopulated_store_scene needs scene_builder_args.site_catalog"
+    assert not spec.mutations, \
+        "build_repopulated_store_scene ignores mutations (sites drive placement); leave the list empty"
     store = _load_store_with_lights(spec, runtime)
     sites = store_mutations.load_sites(spec.site_catalog)
     assert len(objects) <= len(sites), (
