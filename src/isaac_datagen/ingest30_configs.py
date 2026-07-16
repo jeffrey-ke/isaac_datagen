@@ -50,6 +50,8 @@ def base_config(sa: ScriptArgs, base_classes: list[str]) -> dict:
         dataset_dir=f"{sa.root}/datasets/base",
         scene_builder="build_scene",
         scene_builder_args={"grasp_frames": "catalog",
+                            "orientation": {"name": "AlignGraspFronts",
+                                            "args": {"azimuth_deg": -90}},  # fronts face -Y (bbox-grasp convention)
                             "mutations": _disable_physics(base_classes)},
         placement="UntilExhaustedStacker",
         placement_args={"max_column_height": 3, "min_y": 0.0, "max_y": 0.10,

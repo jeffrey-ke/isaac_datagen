@@ -109,3 +109,24 @@ def test_smoke_config_fields(tmp_path):
     assert cfg["scene_builder"] == "build_store_scene"
     assert cfg["filter_specs"][0]["args"]["value"] == "^(snack031)$"
     assert cfg["seed"] == 3201
+
+
+_ORIENTATION = {"name": "AlignGraspFronts", "args": {"azimuth_deg": -90}}
+
+
+def test_base_config_fronts_objects(tmp_path):
+    sa = sa_for(tmp_path)
+    cfg = base_config(sa, ["cereal001"])
+    assert cfg["scene_builder_args"]["orientation"] == _ORIENTATION
+
+
+def test_composed_config_fronts_objects(tmp_path):
+    sa = sa_for(tmp_path)
+    cfg = test_composed_config(sa, ["cereal001", "snack031"])
+    assert cfg["scene_builder_args"]["orientation"] == _ORIENTATION
+
+
+def test_pool_and_store_configs_have_no_orientation(tmp_path):
+    sa = sa_for(tmp_path)
+    assert "orientation" not in pool_config(sa, "snack031")["scene_builder_args"]
+    assert "orientation" not in test_store_config(sa, ["snack031"])["scene_builder_args"]
