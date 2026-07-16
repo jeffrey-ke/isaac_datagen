@@ -39,7 +39,7 @@ def _halo(xr, yr, zr):
 
 
 def _disable_physics(classes):
-    return [{"name": "DisablePhysics", "args": {"pattern": c}} for c in classes]
+    return [{"name": "DisablePhysics", "args": {"pattern": f"{c}*"}} for c in classes]
 
 
 def base_config(sa: ScriptArgs, base_classes: list[str]) -> dict:

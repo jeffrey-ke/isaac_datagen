@@ -48,7 +48,7 @@ def test_pool_config(tmp_path):
     assert cfg["dataset_dir"].endswith("datasets/pools/snack031-1inst")
     assert cfg["filter_specs"] == [
         {"name": "RegexFilter", "args": {"key": "class", "value": "^snack031$"}}]
-    assert {"name": "DisablePhysics", "args": {"pattern": "snack031"}} \
+    assert {"name": "DisablePhysics", "args": {"pattern": "snack031*"}} \
         in cfg["scene_builder_args"]["mutations"]
     assert cfg["objects_path"] == [str(sa.ingest_catalog)]
 
@@ -60,7 +60,7 @@ def test_base_config(tmp_path):
     assert cfg["filter_specs"][0] == {
         "name": "ReplicateFilter", "args": {"key": "name", "value": "*", "count": 5}}
     muts = cfg["scene_builder_args"]["mutations"]
-    assert {"name": "DisablePhysics", "args": {"pattern": "cereal001"}} in muts
+    assert {"name": "DisablePhysics", "args": {"pattern": "cereal001*"}} in muts
 
 
 def test_store_config_covers_all_classes(tmp_path):
@@ -98,7 +98,7 @@ def test_composed_config_fields(tmp_path):
     assert cfg["filter_specs"][0]["args"]["count"] == 3  # test_composed_replicas, not base_replicas
     muts = cfg["scene_builder_args"]["mutations"]
     for c in all_classes:
-        assert {"name": "DisablePhysics", "args": {"pattern": c}} in muts
+        assert {"name": "DisablePhysics", "args": {"pattern": f"{c}*"}} in muts
 
 
 def test_smoke_config_fields(tmp_path):
