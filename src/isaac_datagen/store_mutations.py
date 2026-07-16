@@ -69,8 +69,8 @@ def _bottom_center(lo, hi):
 
 def _orthonormal_rotation(l2w):
     sc = np.linalg.norm(l2w[:3, :3], axis=0)
-    assert np.allclose(sc, sc[0], rtol=1e-3), f"non-uniform scale in product l2w: {sc}"
-    rot = l2w[:3, :3] / sc
+    rot = l2w[:3, :3] / sc   # per-column de-scale recovers R from R @ diag(s), non-uniform included
+    assert np.allclose(rot @ rot.T, np.eye(3), atol=1e-4), f"shear in product l2w:\n{l2w[:3, :3]}"
     assert np.linalg.det(rot) > 0.9, f"improper rotation:\n{rot}"
     assert rot[2, 2] > 0.99, f"product not upright:\n{rot}"
     return rot

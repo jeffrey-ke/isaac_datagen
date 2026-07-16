@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import yaml
 
-from isaac_datagen.store_mutations import Site, load_sites
+from isaac_datagen.store_mutations import Site, _orthonormal_rotation, load_sites
 
 KEEP = "assets/optflow_objects/store001-optflow-objects-keep"   # via the assets symlink; cwd = isaac_datagen
 
@@ -14,6 +14,20 @@ def test_load_sites_real_keep_catalog():
     assert all(s.store_prim.endswith("/v_0") for s in sites)     # store_prim points at the v_0 geometry prim
     assert all(s.grasp.shape == (4, 4) for s in sites)
     assert len({s.cls for s in sites}) == 42
+
+
+def test_orthonormal_rotation_nonuniform_scale():
+    rz = np.array([[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]])
+    l2w = np.eye(4)
+    l2w[:3, :3] = rz @ np.diag([0.6, 0.5, 0.6])   # real store001 shelf-product scale
+    assert np.allclose(_orthonormal_rotation(l2w), rz)
+
+
+def test_orthonormal_rotation_rejects_shear():
+    l2w = np.eye(4)
+    l2w[0, 1] = 0.3
+    with pytest.raises(AssertionError, match="shear"):
+        _orthonormal_rotation(l2w)
 
 
 def test_load_sites_rejects_catalog_without_store_prim(tmp_path):
