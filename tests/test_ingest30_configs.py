@@ -187,18 +187,11 @@ def test_write_all(tmp_path):
 
 
 def test_write_all_no_smoke_configs(tmp_path):
-    sa = sa_for(tmp_path)              # M=4 classes, n_sites=10, replicate=2 -> 8 <= 10 OK
+    sa = sa_for(tmp_path)              # M=4 classes, replicate=2 (site cap lives in _init_manifest now)
     write_all(sa)
     out = tmp_path / "root" / "configs" / "datagen"
     assert (out / "test-store.yaml").exists()
     assert not (out / "smoke").exists()          # smoke configs no longer written
-
-
-def test_write_all_site_cap_violation(tmp_path):
-    import pytest
-    sa = sa_for(tmp_path, n_sites=6)             # M=4 classes, replicate=2 -> 8 > 6 -> refuse
-    with pytest.raises(AssertionError, match="exceeds the 6 curated store sites"):
-        write_all(sa)
 
 
 def test_composed_config_fields(tmp_path):

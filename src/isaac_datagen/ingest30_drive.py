@@ -181,6 +181,10 @@ def _init_manifest(a) -> ScriptArgs:
     assert replicas >= 1, (
         f"{m} classes vs {n_sites} store sites: no room to fill even one per class — "
         f"use fewer classes or a larger site catalog")
+    assert m * replicas <= n_sites, (          # before sa.save: over-cap writes no manifest
+        f"store repopulation: {m} classes x replicate {replicas} = {m * replicas} objects "
+        f"exceeds the {n_sites} curated store sites. Reduce --test-store-replicas to "
+        f"<= {n_sites // m}, or place overflow via the composed scene (no fixed-site limit).")
     sa = ScriptArgs(
         root=str(root), base_assets=base_assets, ingest_assets=ingest_assets,
         base_classes=base_classes, ingest_classes=ingest_classes,

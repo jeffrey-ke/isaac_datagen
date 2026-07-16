@@ -138,6 +138,30 @@ def test_no_smoke_verb():
         parse_args(["smoke", "/tmp/root"])
 
 
+def test_init_refuses_over_cap_before_writing_manifest(tmp_path, monkeypatch):
+    import isaac_datagen.asset_catalogs as ac
+    monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "assemble_catalog",
+                        lambda paths, dest: {"base": ["a"], "ingest": ["b", "c"]}[Path(dest).name])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 2)   # only 2 curated sites
+
+    bake_cfg = tmp_path / "fpn.yaml"
+    bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
+    a = argparse.Namespace(
+        root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
+        descriptor="D", descriptor_config=str(bake_cfg),
+        seed_base=1, seed_pools=2, seed_test=3,
+        base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+        pool_frames=3, test_store_num_frames=1,
+        test_composed_num_dirs=1, test_composed_num_targets=1,
+        test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=5, test_store_num_targets=20,
+    )
+    with pytest.raises(AssertionError, match="exceeds the 2 curated store sites"):
+        _init_manifest(a)                              # 3 classes x 5 = 15 > 2 sites
+    assert not (tmp_path / "manifest.yaml").exists()   # over-cap must write no manifest
+
+
 def test_init_force_semantics(tmp_path, monkeypatch):
     import isaac_datagen.asset_catalogs as ac
     assembled = []

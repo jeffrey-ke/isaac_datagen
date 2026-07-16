@@ -162,13 +162,8 @@ def write_all(sa: ScriptArgs) -> list[Path]:
         "manifest ingest_classes drifted from assembled catalog"
     all_classes = sorted(base_classes + ingest_classes)
 
-    n_sites = len(catalog_meta(sa.site_catalog))
+    n_sites = len(catalog_meta(sa.site_catalog))   # site cap is enforced upstream in _init_manifest
     m = len(all_classes)
-    assert m * sa.test_store_replicas <= n_sites, (
-        f"store repopulation: {m} classes x replicate {sa.test_store_replicas} = "
-        f"{m * sa.test_store_replicas} objects exceeds the {n_sites} curated store sites. "
-        f"Reduce --test-store-replicas to <= {n_sites // m}, or place overflow via the "
-        f"composed scene (no fixed-site limit).")
 
     out = Path(sa.root) / "configs" / "datagen"
     out.mkdir(parents=True, exist_ok=True)
