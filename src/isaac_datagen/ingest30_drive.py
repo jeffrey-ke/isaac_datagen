@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -170,12 +171,26 @@ def run_init(a) -> None:
         run_stage("init", stage, fn(sa), sa.root)
 
 
+def _unpack_arm_positionals(args_: list[str]) -> tuple[str, str | None, str]:
+    if len(args_) == 2:
+        base_config, root = args_
+        return base_config, None, root
+    if len(args_) == 3:
+        base_config, ingest_config, root = args_
+        return base_config, ingest_config, root
+    assert False, (
+        "arm expects 'base_config root' (2 positionals, e.g. retrained) or "
+        f"'base_config ingest_config root' (3 positionals); got {len(args_)}: {args_!r}"
+    )
+
+
 def run_arm(a) -> None:
-    assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
+    base_config, ingest_config, root = _unpack_arm_positionals(a.args_)
+    assert (Path(root) / "manifest.yaml").exists(), f"{root}: not an inited root"
     subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"])
-    for i, cmd in enumerate(arm_commands(a.root, a.ops, a.base_config, a.ingest_config,
+    for i, cmd in enumerate(arm_commands(root, a.ops, base_config, ingest_config,
                                          a.label, a.all_data, a.allow_dirty)):
-        run_stage("arm", f"{a.label or a.ops}-{i}", [cmd], a.root)
+        run_stage("arm", f"{a.label or a.ops}-{i}", [cmd], root)
 
 
 def run_score(a) -> None:
@@ -222,9 +237,7 @@ def _parser() -> argparse.ArgumentParser:
 
     arm = sub.add_parser("arm")
     arm.add_argument("ops")
-    arm.add_argument("base_config")
-    arm.add_argument("ingest_config", nargs="?", default=None)
-    arm.add_argument("root")
+    arm.add_argument("args_", nargs="+", metavar="base_config [ingest_config] root")
     arm.add_argument("--label", default=None)
     arm.add_argument("--all-data", action="store_true")
     arm.add_argument("--allow-dirty", action="store_true")
@@ -240,6 +253,34 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
+ARM_VALUE_FLAGS = {"--label"}                       # arm flags that take one value
+ARM_BOOL_FLAGS = {"--all-data", "--allow-dirty"}     # arm flags that take none
+
+
+def _reorder_arm_argv(rest: list[str]) -> list[str]:
+    # argparse can't split one nargs="+" positional run across a flag interspersed
+    # between two of its values (stdlib limitation, cf. bpo-9338) — move arm's
+    # flags after its positionals so parse_args always sees one contiguous run.
+    positionals, flags = [], []
+    it = iter(rest)
+    for tok in it:
+        name = tok.split("=", 1)[0]
+        if name in ARM_BOOL_FLAGS or name in ARM_VALUE_FLAGS:
+            flags.append(tok)
+            if name in ARM_VALUE_FLAGS and "=" not in tok:
+                flags.append(next(it))
+        else:
+            positionals.append(tok)
+    return positionals + flags
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "arm":
+        argv = argv[:1] + _reorder_arm_argv(argv[1:])
+    return _parser().parse_args(argv)
+
+
 def main():
-    a = _parser().parse_args()
+    a = parse_args()
     VERBS[a.verb](a)

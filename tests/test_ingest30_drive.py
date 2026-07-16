@@ -6,8 +6,8 @@ import yaml
 
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_drive import (
-    VERBS, _init_manifest, arm_commands, score_commands, smoke_commands,
-    stage_bake, stage_render,
+    VERBS, _init_manifest, _unpack_arm_positionals, arm_commands, parse_args,
+    score_commands, smoke_commands, stage_bake, stage_render,
 )
 
 MANIFEST = dict(
@@ -83,6 +83,34 @@ def test_score_commands():
 
 def test_verb_registry_complete():
     assert list(VERBS) == ["init", "arm", "score", "smoke"]
+
+
+def test_arm_cli_parsing():
+    # (a) contiguous positionals, flags trailing
+    a = parse_args(["arm", "gligen", "b.yaml", "i.yaml", "/r",
+                    "--label", "x", "--allow-dirty"])
+    assert _unpack_arm_positionals(a.args_) == ("b.yaml", "i.yaml", "/r")
+    assert a.label == "x" and a.allow_dirty and not a.all_data
+
+    # (b) flags interspersed between the last two positionals
+    a = parse_args(["arm", "gligen", "b.yaml", "i.yaml", "--label", "x", "/r"])
+    assert _unpack_arm_positionals(a.args_) == ("b.yaml", "i.yaml", "/r")
+    assert a.label == "x" and not a.allow_dirty and not a.all_data
+
+    # (c) the spec transcript line: flag between the 2-item shape's two positionals
+    a = parse_args(["arm", "retrained", "r.yaml", "--all-data", "/r"])
+    assert _unpack_arm_positionals(a.args_) == ("r.yaml", None, "/r")
+    assert a.all_data and a.label is None
+
+    # (d) 2-item shape, flag trailing
+    a = parse_args(["arm", "retrained", "r.yaml", "/r", "--all-data"])
+    assert _unpack_arm_positionals(a.args_) == ("r.yaml", None, "/r")
+    assert a.all_data and a.label is None
+
+    # bad shape: neither 2 nor 3 positionals
+    a = parse_args(["arm", "gligen", "only.yaml"])
+    with pytest.raises(AssertionError, match="expects 'base_config root'"):
+        _unpack_arm_positionals(a.args_)
 
 
 def test_smoke_commands():
