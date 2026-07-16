@@ -22,6 +22,7 @@ class StoreSceneSpec:
     grasp_frame_policy_args: dict = field(default_factory=dict)
     mutations: list = field(default_factory=list)
     require_tracked_only: list = field(default_factory=list)
+    site_catalog: str = ""       # curated site catalog; required by build_repopulated_store_scene
 
     def __post_init__(self):
         assert Path(self.store_usd).exists(), f"store_usd missing: {self.store_usd}"
@@ -47,6 +48,9 @@ def load_store(spec: StoreSceneSpec):
 
 
 def resolve_product_prim(store, obj):
+    assert "store_prim" in obj.meta, (
+        f"object {obj.meta.get('name')!r} (class {obj.meta.get('class')!r}) has no store_prim — "
+        f"not a store-native object; it cannot be native-revealed (use repopulation instead)")
     path = store.GetPath().AppendPath(obj.meta["store_prim"])
     prim = store.GetStage().GetPrimAtPath(path)
     assert prim.IsValid(), f"catalog object {obj.meta['name']}: no prim at {path}"
@@ -60,16 +64,9 @@ def add_catalog_grasp_frame(prim_path: str, obj) -> str:
     return grasp.GetPath().pathString
 
 
-def build_store_scene(runtime, objects) -> SceneHandle:
-    spec = StoreSceneSpec(**runtime.scene_builder_args)
-    store = load_store(spec)
-    if runtime.dome_light:
-        make_dome_light(store.GetStage(), "/World", intensity=runtime.dome_fill_intensity,
-                        normalize=runtime.dome_normalize)
-    targets = [store_mutations.CaptureTarget(o, resolve_product_prim(store, o).GetPath().pathString)
-               for o in objects]
-    targets = store_mutations.apply_mutations(store, spec, targets, runtime.effective_seed)
-
+def _finalize_store_scene(store, spec, targets, runtime) -> SceneHandle:
+    # Shared tail: leaked-product guard + per-target label/grasp-frame + camera + SceneHandle.
+    # Generic over targets, so inserted (repopulation) and revealed (native) targets both work.
     tracked = {t.obj.meta["class"] for t in targets}
     for glob in spec.require_tracked_only:
         leaked = sorted(p.GetName() for p in store_mutations.active_products(store, [glob])
@@ -92,3 +89,41 @@ def build_store_scene(runtime, objects) -> SceneHandle:
     return SceneHandle(zed=zed, grasp_points=grasp_frames,
                        objects=[t.obj for t in targets],
                        object_prim_paths=object_prim_paths)
+
+
+def _load_store_with_lights(spec, runtime):
+    store = load_store(spec)
+    if runtime.dome_light:
+        make_dome_light(store.GetStage(), "/World", intensity=runtime.dome_fill_intensity,
+                        normalize=runtime.dome_normalize)
+    return store
+
+
+def build_store_scene(runtime, objects) -> SceneHandle:
+    spec = StoreSceneSpec(**runtime.scene_builder_args)
+    store = _load_store_with_lights(spec, runtime)
+    targets = [store_mutations.CaptureTarget(o, resolve_product_prim(store, o).GetPath().pathString)
+               for o in objects]
+    targets = store_mutations.apply_mutations(store, spec, targets, runtime.effective_seed)
+    return _finalize_store_scene(store, spec, targets, runtime)
+
+
+def build_repopulated_store_scene(runtime, objects) -> SceneHandle:
+    """Repopulate curated shelf sites with the collected object queue (any provenance).
+
+    Objects arrive already collected + ReplicateFilter'd + ShuffleFilter'd; zip them against
+    the sites in order, insert each anchored to the site's curated grasp, strip the rest."""
+    spec = StoreSceneSpec(**runtime.scene_builder_args)
+    assert spec.site_catalog, "build_repopulated_store_scene needs scene_builder_args.site_catalog"
+    store = _load_store_with_lights(spec, runtime)
+    sites = store_mutations.load_sites(spec.site_catalog)
+    assert len(objects) <= len(sites), (
+        f"store repopulation: {len(objects)} objects exceed {len(sites)} curated sites — "
+        f"reduce the store ReplicateFilter count, or use the composed scene (no site limit)")
+    stage = store.GetStage()
+    create_empty("StoreSwaps", "/World")
+    targets = [store_mutations.replace_instance(stage, store, site.store_prim, obj, site.grasp)
+               for site, obj in zip(sites, objects)]            # queue order == placement order
+    store_mutations.deactivate_remaining_products(store, spec)  # strip unused sites + non-catalog SKUs
+    print(f"[scene] repopulated {len(targets)}/{len(sites)} sites", flush=True)
+    return _finalize_store_scene(store, spec, targets, runtime)
