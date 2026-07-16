@@ -487,5 +487,6 @@ def build_scene(runtime, objects: List[GraspableObject]):
     zed = ZedMini("gripper", "/World", intrinsics, width=runtime.width, height=runtime.height)
 
 
+    # geo, not wrapper: l2w consumers need the mesh frame (orientation yaw lives on geo)
     return SceneHandle(zed=zed, objects=objects, grasp_points=grasp_frames_paths,
-                       object_prim_paths=objects_paths)
+                       object_prim_paths=[f"{p}/geo" for p in objects_paths])
