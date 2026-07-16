@@ -63,13 +63,16 @@ def _pool_poser(sa: ScriptArgs, cls: str) -> dict:
 
 
 def _disable_physics(metas):
-    """One freeze per placed object, keyed on its NAME (what prims are named after).
+    """One freeze per placed store-extracted object, keyed on its NAME.
 
-    Class-derived patterns can never work: ycb objects (class mustard, name
-    ycb_006_mustard_bottle) share no prefix with their class. Per-name entries also
-    fail loud per object — DisablePhysics asserts each pattern matches."""
-    names = sorted({m["name"] for m in metas})
-    assert names, "no objects to freeze"
+    Names, not classes: prims are named after the object name, and ycb-style names
+    (class mustard, name ycb_006_mustard_bottle) share no prefix with the class.
+    Only store-extracted usdz (the entries carrying store_prim) bake a live
+    RigidBodyAPI and free-fall during capture; blender-built assets have no physics
+    APIs and are already static. That correlation is pipeline convention, not
+    enforced — [MUT] log lines are the audit trail."""
+    assert metas, "no objects placed"
+    names = sorted({m["name"] for m in metas if "store_prim" in m})
     return [{"name": "DisablePhysics", "args": {"pattern": f"{n}*"}} for n in names]
 
 

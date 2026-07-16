@@ -24,13 +24,16 @@ ARGS = dict(
 )
 
 
-def fake_assembled(root, name, classes):
+def fake_assembled(root, name, classes, store_classes=()):
     meta = root / "catalogs" / name / "meta"
     meta.mkdir(parents=True)
     for i, c in enumerate(classes):
-        (meta / f"meta_{i:04d}.yaml").write_text(yaml.safe_dump(
-            # ycb-style: object name shares NO prefix with its class (the DisablePhysics trap)
-            {"name": f"ycb_{i:03d}_{c}", "class": c, "store_prim": f"model_{c}/v_0"}))
+        # ycb-style: object name shares NO prefix with its class (the DisablePhysics trap);
+        # only store-extracted entries carry store_prim (and a live RigidBodyAPI)
+        m = {"name": f"ycb_{i:03d}_{c}", "class": c}
+        if c in store_classes:
+            m["store_prim"] = f"model_{c}/v_0"
+        (meta / f"meta_{i:04d}.yaml").write_text(yaml.safe_dump(m))
 
 
 def fake_site_catalog(root, n):
@@ -50,8 +53,8 @@ def sa_for(tmp_path, n_sites=10):
     d = copy.deepcopy(ARGS)
     root = tmp_path / "root"
     d["root"] = str(root)
-    fake_assembled(root, "base", ["cereal001", "sauces001"])
-    fake_assembled(root, "ingest", ["snack031", "flour001"])
+    fake_assembled(root, "base", ["cereal001", "sauces001"], store_classes=("cereal001",))
+    fake_assembled(root, "ingest", ["snack031", "flour001"], store_classes=("flour001",))
     d["store_site_catalog"] = str(fake_site_catalog(root, n_sites))
     p = tmp_path / "manifest.yaml"
     p.write_text(yaml.safe_dump(d))
@@ -65,9 +68,10 @@ def test_pool_config(tmp_path):
     assert cfg["dataset_dir"].endswith("datasets/pools/snack031-1inst")
     assert cfg["filter_specs"] == [
         {"name": "RegexFilter", "args": {"key": "class", "value": "^snack031$"}}]
-    assert cfg["scene_builder_args"]["mutations"] == [
-        {"name": "DisablePhysics", "args": {"pattern": "ycb_000_snack031*"}}]  # placed names only
+    assert cfg["scene_builder_args"]["mutations"] == []       # blender-built: already static
     assert cfg["objects_path"] == [str(sa.ingest_catalog)]
+    assert pool_config(sa, "flour001")["scene_builder_args"]["mutations"] == [
+        {"name": "DisablePhysics", "args": {"pattern": "ycb_001_flour001*"}}]  # store-extracted: freeze by name
 
 
 def test_pool_config_default_poser_unchanged(tmp_path):
@@ -159,7 +163,7 @@ def test_base_config(tmp_path):
         "name": "ReplicateFilter", "args": {"key": "name", "value": "*", "count": 5}}
     muts = cfg["scene_builder_args"]["mutations"]
     assert [m["args"]["pattern"] for m in muts] == [
-        "ycb_000_cereal001*", "ycb_001_sauces001*"]   # one freeze per placed base object
+        "ycb_000_cereal001*"]   # only the store-extracted base object freezes; sauces001 is static
 
 
 def test_store_config_repopulates(tmp_path):
@@ -214,8 +218,8 @@ def test_composed_config_fields(tmp_path):
     assert cfg["objects_path"] == [str(sa.base_catalog), str(sa.ingest_catalog)]
     assert cfg["filter_specs"][0]["args"]["count"] == 3  # test_composed_replicas, not base_replicas
     muts = cfg["scene_builder_args"]["mutations"]
-    assert {m["args"]["pattern"] for m in muts} == {     # every base+ingest object frozen by name
-        "ycb_000_cereal001*", "ycb_001_sauces001*", "ycb_000_snack031*", "ycb_001_flour001*"}
+    assert {m["args"]["pattern"] for m in muts} == {     # store-extracted members of base+ingest only
+        "ycb_000_cereal001*", "ycb_001_flour001*"}
 
 
 _ORIENTATION = {"name": "AlignGraspFronts", "args": {"azimuth_deg": -90}}
