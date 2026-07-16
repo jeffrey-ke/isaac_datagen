@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 
 from vision_core.script_args import ScriptArgs
-from isaac_datagen.asset_catalogs import catalog_classes
+from isaac_datagen.asset_catalogs import catalog_classes, catalog_meta
 
 _REFMATCH = "../../../reference_matching/src/reference_matching/configs"
 PRODUCT_PATTERNS = ["model_snack*", "model_instant_beverages*", "model_flour*",
@@ -62,11 +62,18 @@ def _pool_poser(sa: ScriptArgs, cls: str) -> dict:
     return cfg
 
 
-def _disable_physics(classes):
-    return [{"name": "DisablePhysics", "args": {"pattern": f"{c}*"}} for c in classes]
+def _disable_physics(metas):
+    """One freeze per placed object, keyed on its NAME (what prims are named after).
+
+    Class-derived patterns can never work: ycb objects (class mustard, name
+    ycb_006_mustard_bottle) share no prefix with their class. Per-name entries also
+    fail loud per object — DisablePhysics asserts each pattern matches."""
+    names = sorted({m["name"] for m in metas})
+    assert names, "no objects to freeze"
+    return [{"name": "DisablePhysics", "args": {"pattern": f"{n}*"}} for n in names]
 
 
-def base_config(sa: ScriptArgs, base_classes: list[str]) -> dict:
+def base_config(sa: ScriptArgs) -> dict:
     return _COMMON | _JITTERED_LIGHTS | _halo([0.25, 0.85], [-0.42, 0.42], [-0.40, 0.40]) | dict(
         seed=sa.seeds.base, idx=0,
         num_targets=sa.base_num_targets, num_frames=sa.base_num_frames,
@@ -75,7 +82,7 @@ def base_config(sa: ScriptArgs, base_classes: list[str]) -> dict:
         scene_builder_args={"grasp_frames": "catalog",
                             "orientation": {"name": "AlignGraspFronts",
                                             "args": {"azimuth_deg": -90}},  # fronts face -Y (bbox-grasp convention)
-                            "mutations": _disable_physics(base_classes)},
+                            "mutations": _disable_physics(catalog_meta(sa.base_catalog))},
         placement="UntilExhaustedStacker",
         placement_args={"max_column_height": 3, "min_y": 0.0, "max_y": 0.10,
                         "min_gap": 0.0, "max_gap": 0.50},
@@ -95,7 +102,9 @@ def pool_config(sa: ScriptArgs, cls: str) -> dict:
         dataset_dir=f"{sa.root}/datasets/pools/{cls}-1inst",
         scene_builder="build_scene",
         scene_builder_args={"grasp_frames": "catalog",
-                            "mutations": _disable_physics([cls])},
+                            "mutations": _disable_physics(
+                                [m for m in catalog_meta(sa.ingest_catalog)
+                                 if m["class"] == cls])},
         placement="UntilExhaustedStacker",
         placement_args={"max_column_height": 1},
         objects_path=[str(sa.ingest_catalog)],
@@ -138,12 +147,17 @@ def test_store_config(sa: ScriptArgs, classes: list[str]) -> dict:
 test_store_config.__test__ = False   # builder, not a pytest test, despite the name
 
 
-def test_composed_config(sa: ScriptArgs, all_classes: list[str]) -> dict:
-    return base_config(sa, all_classes) | dict(
+def test_composed_config(sa: ScriptArgs) -> dict:
+    return base_config(sa) | dict(
         seed=sa.seeds.test,
         num_targets=sa.test_composed_num_targets,
         num_frames=sa.test_composed_num_frames,
         dataset_dir=f"{sa.root}/datasets/test/composed",
+        scene_builder_args={"grasp_frames": "catalog",
+                            "orientation": {"name": "AlignGraspFronts",
+                                            "args": {"azimuth_deg": -90}},  # fronts face -Y (bbox-grasp convention)
+                            "mutations": _disable_physics(catalog_meta(sa.base_catalog)
+                                                          + catalog_meta(sa.ingest_catalog))},
         objects_path=[str(sa.base_catalog), str(sa.ingest_catalog)],
         filter_specs=[
             {"name": "ReplicateFilter",
@@ -155,7 +169,6 @@ test_composed_config.__test__ = False   # builder, not a pytest test, despite th
 
 
 def write_all(sa: ScriptArgs) -> list[Path]:
-    from isaac_datagen.asset_catalogs import catalog_meta
     base_classes, ingest_classes = list(sa.base_classes), list(sa.ingest_classes)
     overlap = set(base_classes) & set(ingest_classes)
     assert not overlap, f"base/ingest share classes: {sorted(overlap)}"
@@ -170,9 +183,9 @@ def write_all(sa: ScriptArgs) -> list[Path]:
 
     out = Path(sa.root) / "configs" / "datagen"
     out.mkdir(parents=True, exist_ok=True)
-    configs: dict[Path, dict] = {out / "base.yaml": base_config(sa, base_classes),
+    configs: dict[Path, dict] = {out / "base.yaml": base_config(sa),
                                  out / "test-store.yaml": test_store_config(sa, all_classes),
-                                 out / "test-composed.yaml": test_composed_config(sa, all_classes)}
+                                 out / "test-composed.yaml": test_composed_config(sa)}
     for cls in ingest_classes:
         configs[out / f"pool-{cls}.yaml"] = pool_config(sa, cls)
 

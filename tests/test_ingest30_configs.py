@@ -29,7 +29,8 @@ def fake_assembled(root, name, classes):
     meta.mkdir(parents=True)
     for i, c in enumerate(classes):
         (meta / f"meta_{i:04d}.yaml").write_text(yaml.safe_dump(
-            {"name": c, "class": c, "store_prim": f"model_{c}/v_0"}))
+            # ycb-style: object name shares NO prefix with its class (the DisablePhysics trap)
+            {"name": f"ycb_{i:03d}_{c}", "class": c, "store_prim": f"model_{c}/v_0"}))
 
 
 def fake_site_catalog(root, n):
@@ -64,8 +65,8 @@ def test_pool_config(tmp_path):
     assert cfg["dataset_dir"].endswith("datasets/pools/snack031-1inst")
     assert cfg["filter_specs"] == [
         {"name": "RegexFilter", "args": {"key": "class", "value": "^snack031$"}}]
-    assert {"name": "DisablePhysics", "args": {"pattern": "snack031*"}} \
-        in cfg["scene_builder_args"]["mutations"]
+    assert cfg["scene_builder_args"]["mutations"] == [
+        {"name": "DisablePhysics", "args": {"pattern": "ycb_000_snack031*"}}]  # placed names only
     assert cfg["objects_path"] == [str(sa.ingest_catalog)]
 
 
@@ -152,12 +153,13 @@ def test_pool_config_log_offset_sampler_injected_with_decentered_poser(tmp_path)
 
 def test_base_config(tmp_path):
     sa = sa_for(tmp_path)
-    cfg = base_config(sa, ["cereal001", "sauces001"])
+    cfg = base_config(sa)
     assert cfg["seed"] == 3001 and cfg["num_targets"] == 4 and cfg["num_frames"] == 10
     assert cfg["filter_specs"][0] == {
         "name": "ReplicateFilter", "args": {"key": "name", "value": "*", "count": 5}}
     muts = cfg["scene_builder_args"]["mutations"]
-    assert {"name": "DisablePhysics", "args": {"pattern": "cereal001*"}} in muts
+    assert [m["args"]["pattern"] for m in muts] == [
+        "ycb_000_cereal001*", "ycb_001_sauces001*"]   # one freeze per placed base object
 
 
 def test_store_config_repopulates(tmp_path):
@@ -205,16 +207,15 @@ def test_write_all_no_smoke_configs(tmp_path):
 
 def test_composed_config_fields(tmp_path):
     sa = sa_for(tmp_path)
-    all_classes = ["cereal001", "flour001", "sauces001", "snack031"]
-    cfg = test_composed_config(sa, all_classes)
+    cfg = test_composed_config(sa)
     assert cfg["seed"] == 3201                           # test seed, not base's 3001
     assert cfg["num_targets"] == 4 and cfg["num_frames"] == 10
     assert cfg["dataset_dir"].endswith("datasets/test/composed")
     assert cfg["objects_path"] == [str(sa.base_catalog), str(sa.ingest_catalog)]
     assert cfg["filter_specs"][0]["args"]["count"] == 3  # test_composed_replicas, not base_replicas
     muts = cfg["scene_builder_args"]["mutations"]
-    for c in all_classes:
-        assert {"name": "DisablePhysics", "args": {"pattern": f"{c}*"}} in muts
+    assert {m["args"]["pattern"] for m in muts} == {     # every base+ingest object frozen by name
+        "ycb_000_cereal001*", "ycb_001_sauces001*", "ycb_000_snack031*", "ycb_001_flour001*"}
 
 
 _ORIENTATION = {"name": "AlignGraspFronts", "args": {"azimuth_deg": -90}}
