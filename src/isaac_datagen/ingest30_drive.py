@@ -221,46 +221,137 @@ VERBS = {"init": run_init, "arm": run_arm, "score": run_score, "smoke": run_smok
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="meta")
+    raw = dict(formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        prog="meta", **raw,
+        description=(
+            "ingest30 experiment driver: init -> smoke -> arm -> score.\n\n"
+            "Run from isaac_datagen/ as `uv run meta ...`. Output appends to\n"
+            "<root>/logs/<verb>-<stage>.log. Every verb except init needs an inited\n"
+            "root (<root>/manifest.yaml). GPU verbs print nvidia-smi memory used\n"
+            "first -- check the GPU is free before launching."
+        ),
+        epilog=(
+            "example transcript (root on /data):\n"
+            "  meta init base.txt ingest.txt <root> --descriptor CleanDiftFpn \\\n"
+            "      --descriptor-config ../reference_matching/src/reference_matching/"
+            "configs/fpn_cleandift_123.yaml\n"
+            "  meta smoke <root>\n"
+            "  meta arm gligen src/segmentation/configs/ingest30/base-train-gligen.yaml \\\n"
+            "      src/segmentation/configs/ingest30/ingest-gligen.yaml <root> --allow-dirty\n"
+            "  meta arm retrained src/segmentation/configs/ingest30/base-train-closed.yaml"
+            " --all-data <root>\n"
+            "  meta score gligen <root>"
+        ),
+    )
     sub = p.add_subparsers(dest="verb", required=True)
 
-    ini = sub.add_parser("init")
-    ini.add_argument("base_assets")
-    ini.add_argument("ingest_assets")
-    ini.add_argument("root")
-    ini.add_argument("--descriptor", required=True)
-    ini.add_argument("--descriptor-config", required=True)
-    ini.add_argument("--force", action="store_true")
-    ini.add_argument("--seed-base", type=int, default=3001)
-    ini.add_argument("--seed-pools", type=int, default=3101)
-    ini.add_argument("--seed-test", type=int, default=3201)
+    ini = sub.add_parser(
+        "init", **raw,
+        help="assemble catalogs + manifest, write datagen configs, "
+             "render -> bake -> squash -> flatten",
+        description=(
+            "Assemble asset catalogs, freeze <root>/manifest.yaml, write the datagen\n"
+            "configs, then run render -> bake -> squash -> flatten.\n\n"
+            "Resumable: re-running with the SAME asset lists resumes, skipping dirs\n"
+            "already rendered/baked/squashed. Different lists against an existing\n"
+            "manifest is a hard error -- use a new root, or --force."
+        ),
+    )
+    ini.add_argument("base_assets",
+                     help="newline-separated reference-image paths; line count = N (base classes)")
+    ini.add_argument("ingest_assets",
+                     help="newline-separated reference-image paths; line count = M-N; "
+                          "no class overlap with base (asserted)")
+    ini.add_argument("root", help="experiment root; put it on /data")
+    ini.add_argument("--descriptor", required=True,
+                     help="must equal the `name:` inside --descriptor-config (asserted)")
+    ini.add_argument("--descriptor-config", required=True,
+                     help="descriptor bake config, path relative to isaac_datagen/")
+    ini.add_argument("--force", action="store_true",
+                     help="rebuild tool-owned regenerables (catalogs/{base,ingest}, flat_test, "
+                          "configs/datagen); refuses if datasets/ exists -- delete stale "
+                          "renders by hand, exact names only")
+    ini.add_argument("--seed-base", type=int, default=3001,
+                     help="base-dataset seed (default: %(default)s)")
+    ini.add_argument("--seed-pools", type=int, default=3101,
+                     help="-1inst pool seed (default: %(default)s)")
+    ini.add_argument("--seed-test", type=int, default=3201,
+                     help="held-out test seed (default: %(default)s)")
     # size defaults = the spec §4 example values; verify against
     # expanded-refseg-v2 at execution and adjust HERE only
-    ini.add_argument("--base-num-dirs", type=int, default=3)
-    ini.add_argument("--base-num-targets", type=int, default=10)
-    ini.add_argument("--base-num-frames", type=int, default=100)
-    ini.add_argument("--base-replicas", type=int, default=5)
-    ini.add_argument("--pool-frames", type=int, default=100)
-    ini.add_argument("--test-store-num-frames", type=int, default=5)
-    ini.add_argument("--test-composed-num-dirs", type=int, default=2)
-    ini.add_argument("--test-composed-num-targets", type=int, default=10)
-    ini.add_argument("--test-composed-num-frames", type=int, default=50)
-    ini.add_argument("--test-composed-replicas", type=int, default=3)
+    ini.add_argument("--base-num-dirs", type=int, default=3,
+                     help="base render dirs (default: %(default)s)")
+    ini.add_argument("--base-num-targets", type=int, default=10,
+                     help="capture targets per base scene (default: %(default)s)")
+    ini.add_argument("--base-num-frames", type=int, default=100,
+                     help="frames per base dir (default: %(default)s)")
+    ini.add_argument("--base-replicas", type=int, default=5,
+                     help="copies of each object placed in a base scene (default: %(default)s)")
+    ini.add_argument("--pool-frames", type=int, default=100,
+                     help="frames per -1inst pool dir, one dir per ingest class "
+                          "(default: %(default)s)")
+    ini.add_argument("--test-store-num-frames", type=int, default=5,
+                     help="frames for the store test render (default: %(default)s)")
+    ini.add_argument("--test-composed-num-dirs", type=int, default=2,
+                     help="composed test render dirs (default: %(default)s)")
+    ini.add_argument("--test-composed-num-targets", type=int, default=10,
+                     help="capture targets per composed test scene (default: %(default)s)")
+    ini.add_argument("--test-composed-num-frames", type=int, default=50,
+                     help="frames per composed test dir (default: %(default)s)")
+    ini.add_argument("--test-composed-replicas", type=int, default=3,
+                     help="copies of each object placed in a composed test scene "
+                          "(default: %(default)s)")
 
-    arm = sub.add_parser("arm")
-    arm.add_argument("ops")
-    arm.add_argument("args_", nargs="+", metavar="base_config [ingest_config] root")
-    arm.add_argument("--label", default=None)
-    arm.add_argument("--all-data", action="store_true")
-    arm.add_argument("--allow-dirty", action="store_true")
+    arm = sub.add_parser(
+        "arm", **raw,
+        help="train one arm end to end (base train, then ingest loop)",
+        description=(
+            "Train one arm.\n\n"
+            "  gligen|closed:  meta arm <ops> <base_config> <ingest_config> <root>\n"
+            "                  runs ingest30-base-train, then ingest30-loop\n"
+            "  retrained:      meta arm retrained <base_config> --all-data <root>\n"
+            "                  ONE config, closed ops on base + all pools, no loop\n\n"
+            "Config paths resolve from segmentation/ (the subprocess cwd), e.g.\n"
+            "src/segmentation/configs/ingest30/base-train-gligen.yaml. Flags may be\n"
+            "interspersed anywhere among the positionals."
+        ),
+    )
+    arm.add_argument("ops", help="gligen | closed | retrained")
+    arm.add_argument("args_", nargs="+", metavar="base_config [ingest_config] root",
+                     help="3 positionals for gligen/closed, 2 for retrained")
+    arm.add_argument("--label", default=None,
+                     help="names runs/checkpacks/scores (default: the ops name)")
+    arm.add_argument("--all-data", action="store_true",
+                     help="retrained only: train on base + all pools")
+    arm.add_argument("--allow-dirty", action="store_true",
+                     help="launch despite uncommitted submodule changes")
 
-    sco = sub.add_parser("score")
-    sco.add_argument("label")
+    sco = sub.add_parser(
+        "score", **raw,
+        help="score a trained arm's checkpoint pack against flat_test",
+        description=(
+            "Score a trained arm's checkpoint pack against <root>/flat_test.\n\n"
+            "A descriptor-stamp mismatch (pack vs flat_test) refuses to score by\n"
+            "design -- re-flatten or re-bake, don't override the guard."
+        ),
+    )
+    sco.add_argument("label", help="arm label used at train time")
     sco.add_argument("root")
-    sco.add_argument("--protocol", default="solo")
-    sco.add_argument("--steps", default=None)
+    sco.add_argument("--protocol", default="solo",
+                     help="scoring protocol registered in PROTOCOLS (default: %(default)s)")
+    sco.add_argument("--steps", default=None,
+                     help="comma-separated step tags to score, e.g. base,00,05 (default: all)")
 
-    smo = sub.add_parser("smoke")
+    smo = sub.add_parser(
+        "smoke", **raw,
+        help="store grasp-frame gate; run BEFORE trusting the full test render",
+        description=(
+            "Render 3 store frames per class and tally grasp-frame coverage into\n"
+            "<root>/smoke/report.csv (zero-frame classes are called out). Run BEFORE\n"
+            "the full test render at real scale."
+        ),
+    )
     smo.add_argument("root")
     return p
 
