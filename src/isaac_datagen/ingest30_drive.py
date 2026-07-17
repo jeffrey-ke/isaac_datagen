@@ -126,6 +126,7 @@ def run_stage(verb: str, stage: str, cmds: list[Cmd], root: str) -> None:
 
 def _init_manifest(a) -> ScriptArgs:
     from isaac_datagen.asset_catalogs import assemble_catalog, read_asset_list
+    from isaac_datagen.pool_object_radii import compute_pool_object_radii
 
     root = Path(a.root)
     manifest = root / "manifest.yaml"
@@ -144,6 +145,10 @@ def _init_manifest(a) -> ScriptArgs:
         sa = ScriptArgs.load(manifest)           # resume: root state is frozen
         assert sa.base_assets == base_assets and sa.ingest_assets == ingest_assets, \
             f"{manifest} exists with DIFFERENT asset lists — new lists need a new root (or --force)"
+        assert sa.pool_poser == a.pool_poser, (
+            f"{manifest} exists with pool_poser={sa.pool_poser!r} — different --pool-poser "
+            f"{a.pool_poser!r} needs a new root (or --force)"
+        )
         print("[meta] init resuming from existing manifest")
         return sa
     assert not (root / "datasets").exists(), \
@@ -157,6 +162,9 @@ def _init_manifest(a) -> ScriptArgs:
     ingest_classes = assemble_catalog(ingest_assets, root / "catalogs" / "ingest")
     overlap = set(base_classes) & set(ingest_classes)
     assert not overlap, f"base/ingest share classes: {sorted(overlap)}"
+    pool_object_radius = {}
+    if a.pool_poser == "DecenteredLookAtPoser":
+        pool_object_radius = compute_pool_object_radii(root / "catalogs" / "ingest")
     sa = ScriptArgs(
         root=str(root), base_assets=base_assets, ingest_assets=ingest_assets,
         base_classes=base_classes, ingest_classes=ingest_classes,
@@ -169,6 +177,7 @@ def _init_manifest(a) -> ScriptArgs:
         test_composed_num_targets=a.test_composed_num_targets,
         test_composed_num_frames=a.test_composed_num_frames,
         test_composed_replicas=a.test_composed_replicas,
+        pool_poser=a.pool_poser, pool_object_radius=pool_object_radius,
     )
     sa.save(manifest)
     return sa
@@ -272,6 +281,10 @@ def _parser() -> argparse.ArgumentParser:
                      help="rebuild tool-owned regenerables (catalogs/{base,ingest}, flat_test, "
                           "configs/datagen); refuses if datasets/ exists -- delete stale "
                           "renders by hand, exact names only")
+    ini.add_argument("--pool-poser", default="LookAtPoser",
+                     choices=["LookAtPoser", "DecenteredLookAtPoser"],
+                     help="-1inst pool poser (default: %(default)s); DecenteredLookAtPoser "
+                          "computes a per-class object_radius from each class's mesh bbox")
     ini.add_argument("--seed-base", type=int, default=3001,
                      help="base-dataset seed (default: %(default)s)")
     ini.add_argument("--seed-pools", type=int, default=3101,

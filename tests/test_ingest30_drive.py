@@ -148,7 +148,7 @@ def test_init_force_semantics(tmp_path, monkeypatch):
 
     a = argparse.Namespace(
         root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
-        descriptor="D", descriptor_config=str(bake_cfg),
+        descriptor="D", descriptor_config=str(bake_cfg), pool_poser="LookAtPoser",
         seed_base=1, seed_pools=2, seed_test=3,
         base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
         pool_frames=3, test_store_num_frames=1,
@@ -188,7 +188,7 @@ def test_init_descriptor_bake_config_mismatch(tmp_path, monkeypatch):
     def a_(descriptor):
         return argparse.Namespace(
             root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
-            descriptor=descriptor, descriptor_config=str(bake_cfg),
+            descriptor=descriptor, descriptor_config=str(bake_cfg), pool_poser="LookAtPoser",
             seed_base=1, seed_pools=2, seed_test=3,
             base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
             pool_frames=3, test_store_num_frames=1,
@@ -201,3 +201,107 @@ def test_init_descriptor_bake_config_mismatch(tmp_path, monkeypatch):
 
     sa = _init_manifest(a_("D"))                        # matching name -> proceeds
     assert sa.descriptor == "D"
+
+
+def test_init_manifest_default_poser_skips_radius(tmp_path, monkeypatch):
+    import isaac_datagen.asset_catalogs as ac
+    import isaac_datagen.pool_object_radii as por
+
+    monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "assemble_catalog",
+                        lambda paths, dest: Path(dest).mkdir(parents=True) or
+                        (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
+
+    def fail_if_called(*a, **kw):
+        raise AssertionError("compute_pool_object_radii must not run for LookAtPoser")
+    monkeypatch.setattr(por, "compute_pool_object_radii", fail_if_called)
+
+    bake_cfg = tmp_path / "fpn.yaml"
+    bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
+    a = argparse.Namespace(
+        root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
+        descriptor="D", descriptor_config=str(bake_cfg), pool_poser="LookAtPoser",
+        seed_base=1, seed_pools=2, seed_test=3,
+        base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+        pool_frames=3, test_store_num_frames=1,
+        test_composed_num_dirs=1, test_composed_num_targets=1,
+        test_composed_num_frames=1, test_composed_replicas=1,
+    )
+    sa = _init_manifest(a)
+    assert sa.pool_poser == "LookAtPoser"
+    assert sa.pool_object_radius == {}
+
+
+def test_init_manifest_decentered_poser_computes_radii(tmp_path, monkeypatch):
+    import isaac_datagen.asset_catalogs as ac
+    import isaac_datagen.pool_object_radii as por
+
+    monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "assemble_catalog",
+                        lambda paths, dest: Path(dest).mkdir(parents=True) or
+                        (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
+
+    seen = {}
+    def fake_compute(ingest_catalog, nproc=None):
+        seen["ingest_catalog"] = ingest_catalog
+        return {"apple": 0.1, "kiwi": 0.2}
+    monkeypatch.setattr(por, "compute_pool_object_radii", fake_compute)
+
+    bake_cfg = tmp_path / "fpn.yaml"
+    bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
+    a = argparse.Namespace(
+        root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
+        descriptor="D", descriptor_config=str(bake_cfg), pool_poser="DecenteredLookAtPoser",
+        seed_base=1, seed_pools=2, seed_test=3,
+        base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+        pool_frames=3, test_store_num_frames=1,
+        test_composed_num_dirs=1, test_composed_num_targets=1,
+        test_composed_num_frames=1, test_composed_replicas=1,
+    )
+    sa = _init_manifest(a)
+    assert sa.pool_poser == "DecenteredLookAtPoser"
+    assert sa.pool_object_radius == {"apple": 0.1, "kiwi": 0.2}
+    assert seen["ingest_catalog"] == Path(tmp_path) / "catalogs" / "ingest"
+
+
+def test_init_resume_pool_poser_mismatch_fails_loud(tmp_path, monkeypatch):
+    import isaac_datagen.asset_catalogs as ac
+
+    monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "assemble_catalog",
+                        lambda paths, dest: Path(dest).mkdir(parents=True) or
+                        (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
+
+    bake_cfg = tmp_path / "fpn.yaml"
+    bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
+
+    def a_(pool_poser, force):
+        return argparse.Namespace(
+            root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=force,
+            descriptor="D", descriptor_config=str(bake_cfg), pool_poser=pool_poser,
+            seed_base=1, seed_pools=2, seed_test=3,
+            base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+            pool_frames=3, test_store_num_frames=1,
+            test_composed_num_dirs=1, test_composed_num_targets=1,
+            test_composed_num_frames=1, test_composed_replicas=1,
+        )
+
+    _init_manifest(a_("LookAtPoser", force=True))          # first init: fresh root
+    with pytest.raises(AssertionError, match="pool_poser"):
+        _init_manifest(a_("DecenteredLookAtPoser", force=False))   # resume, different poser
+
+
+def test_pool_poser_cli_flag_default_and_choices():
+    a = parse_args(["init", "b.txt", "i.txt", "/r",
+                    "--descriptor", "D", "--descriptor-config", "d.yaml"])
+    assert a.pool_poser == "LookAtPoser"
+
+    a = parse_args(["init", "b.txt", "i.txt", "/r",
+                    "--descriptor", "D", "--descriptor-config", "d.yaml",
+                    "--pool-poser", "DecenteredLookAtPoser"])
+    assert a.pool_poser == "DecenteredLookAtPoser"
+
+    with pytest.raises(SystemExit):
+        parse_args(["init", "b.txt", "i.txt", "/r",
+                    "--descriptor", "D", "--descriptor-config", "d.yaml",
+                    "--pool-poser", "NotAThing"])
