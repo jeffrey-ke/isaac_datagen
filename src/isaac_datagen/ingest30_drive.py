@@ -139,6 +139,18 @@ def _init_manifest(a) -> ScriptArgs:
         f"--descriptor {a.descriptor!r} != bake config {a.descriptor_config!r} "
         f"name {bake_cfg_name!r}"
     )
+    if a.pool_offset_sampler == "uniform_offsets":
+        assert a.pool_offset_sampler_floor is None, (
+            "--pool-offset-sampler-floor only applies with a non-default --pool-offset-sampler "
+            f"(got --pool-offset-sampler-floor {a.pool_offset_sampler_floor})"
+        )
+        pool_offset_sampler = {}
+    else:
+        assert a.pool_offset_sampler_floor is not None, (
+            f"--pool-offset-sampler {a.pool_offset_sampler!r} needs --pool-offset-sampler-floor"
+        )
+        pool_offset_sampler = {"name": a.pool_offset_sampler,
+                               "args": {"floor": a.pool_offset_sampler_floor}}
     base_assets = read_asset_list(a.base_assets)
     ingest_assets = read_asset_list(a.ingest_assets)
     if manifest.exists() and not a.force:
@@ -148,6 +160,10 @@ def _init_manifest(a) -> ScriptArgs:
         assert sa.pool_poser == a.pool_poser, (
             f"{manifest} exists with pool_poser={sa.pool_poser!r} — different --pool-poser "
             f"{a.pool_poser!r} needs a new root (or --force)"
+        )
+        assert sa.pool_offset_sampler == pool_offset_sampler, (
+            f"{manifest} exists with pool_offset_sampler={sa.pool_offset_sampler!r} — different "
+            f"--pool-offset-sampler needs a new root (or --force)"
         )
         print("[meta] init resuming from existing manifest")
         return sa
@@ -178,6 +194,7 @@ def _init_manifest(a) -> ScriptArgs:
         test_composed_num_frames=a.test_composed_num_frames,
         test_composed_replicas=a.test_composed_replicas,
         pool_poser=a.pool_poser, pool_object_radius=pool_object_radius,
+        pool_offset_sampler=pool_offset_sampler,
     )
     sa.save(manifest)
     return sa
@@ -285,6 +302,14 @@ def _parser() -> argparse.ArgumentParser:
                      choices=["LookAtPoser", "DecenteredLookAtPoser"],
                      help="-1inst pool poser (default: %(default)s); DecenteredLookAtPoser "
                           "computes a per-class object_radius from each class's mesh bbox")
+    ini.add_argument("--pool-offset-sampler", default="uniform_offsets",
+                     choices=["uniform_offsets", "log_uniform_offsets"],
+                     help="-1inst pool camera-offset distribution (default: %(default)s); "
+                          "log_uniform_offsets biases toward the near/center bound, needs "
+                          "--pool-offset-sampler-floor")
+    ini.add_argument("--pool-offset-sampler-floor", type=float, default=None,
+                     help="floor for --pool-offset-sampler log_uniform_offsets (required with "
+                          "it, forbidden with the default uniform_offsets)")
     ini.add_argument("--seed-base", type=int, default=3001,
                      help="base-dataset seed (default: %(default)s)")
     ini.add_argument("--seed-pools", type=int, default=3101,
