@@ -55,8 +55,11 @@ POOL_POSERS = {"LookAtPoser": lambda xr, yr, zr, radii, cls: _halo(xr, yr, zr),
 def _pool_poser(sa: ScriptArgs, cls: str) -> dict:
     assert sa.pool_poser in POOL_POSERS, \
         f"unknown pool_poser {sa.pool_poser!r} — valid: {sorted(POOL_POSERS)}"
-    return POOL_POSERS[sa.pool_poser]([0.3, 2.0], [-2.0, 2.0], [-0.7, 0.7],
-                                       sa.pool_object_radius, cls)
+    cfg = POOL_POSERS[sa.pool_poser]([0.3, 2.0], [-2.0, 2.0], [-0.7, 0.7],
+                                      sa.pool_object_radius, cls)
+    if sa.pool_offset_sampler:
+        cfg["pose_generation_policy_args"]["offset_sampler"] = sa.pool_offset_sampler
+    return cfg
 
 
 def _disable_physics(classes):

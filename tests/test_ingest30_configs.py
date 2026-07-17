@@ -101,6 +101,40 @@ def test_pool_posers_registry_has_both():
     assert set(POOL_POSERS) == {"LookAtPoser", "DecenteredLookAtPoser"}
 
 
+def test_pool_config_default_offset_sampler_has_no_override(tmp_path):
+    sa = sa_for(tmp_path)                       # pool_offset_sampler defaults to {}
+    cfg = pool_config(sa, "snack031")
+    assert "offset_sampler" not in cfg["pose_generation_policy_args"]
+
+
+def test_pool_config_log_offset_sampler_injected_with_default_poser(tmp_path):
+    import dataclasses
+
+    sa = sa_for(tmp_path)
+    sa = dataclasses.replace(sa, pool_offset_sampler={
+        "name": "log_uniform_offsets", "args": {"floor": 0.02}})
+    cfg = pool_config(sa, "snack031")
+    assert cfg["pose_generation_policy"] == "LookAtPoser"          # unaffected — independent axis
+    assert cfg["pose_generation_policy_args"]["offset_sampler"] == {
+        "name": "log_uniform_offsets", "args": {"floor": 0.02}}
+
+
+def test_pool_config_log_offset_sampler_injected_with_decentered_poser(tmp_path):
+    import dataclasses
+
+    sa = sa_for(tmp_path)
+    sa = dataclasses.replace(sa, pool_poser="DecenteredLookAtPoser",
+                             pool_object_radius={"snack031": 0.22, "flour001": 0.31},
+                             pool_offset_sampler={
+                                 "name": "log_uniform_offsets", "args": {"floor": 0.02}})
+    cfg = pool_config(sa, "snack031")
+    assert cfg["pose_generation_policy"] == "DecenteredLookAtPoser"
+    args = cfg["pose_generation_policy_args"]
+    assert args["object_radius"] == 0.22                           # radii mechanism untouched
+    assert args["offset_sampler"] == {
+        "name": "log_uniform_offsets", "args": {"floor": 0.02}}
+
+
 def test_base_config(tmp_path):
     sa = sa_for(tmp_path)
     cfg = base_config(sa, ["cereal001", "sauces001"])
