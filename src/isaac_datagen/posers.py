@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation as R
 
 from vision_core.pose_utils import (
     generate_random_offsets, look_at, cv2opengl, offset_to_4x4, add_rotation,
-    frustum_normals, cone_in_frustum, pixel_direction, erode_frame_rect,
+    frustum_normals, cone_in_frustum, pixel_direction, erode_frame_rect, resolve_offset_sampler,
 )
 from isaac_datagen.pose_planning import plan_poses
 
@@ -39,11 +39,13 @@ class GridFixedPoser:
 
 class LookAtPoser:
 
-    def __init__(self, xrange, yrange, zrange):
+    def __init__(self, xrange, yrange, zrange, offset_sampler=None):
         self.xrange, self.yrange, self.zrange = xrange, yrange, zrange
+        self.sampler = resolve_offset_sampler(offset_sampler)
 
     def __call__(self, num_frames: int) -> np.ndarray:
-        offsets = generate_random_offsets(self.xrange, self.yrange, self.zrange, num_frames)
+        offsets = generate_random_offsets(self.xrange, self.yrange, self.zrange,
+                                          num_frames, sampler=self.sampler)
         return np.array([cv2opengl(look_at(np.zeros(3), off)) for off in offsets])
 
 
@@ -59,7 +61,7 @@ class DecenteredLookAtPoser:                                # NEW
     """
 
     def __init__(self, xrange, yrange, zrange, intrinsics_path, resolution,
-                 object_radius, margin_deg=1.0, max_roll_deg=15.0):
+                 object_radius, margin_deg=1.0, max_roll_deg=15.0, offset_sampler=None):
         self.xrange, self.yrange, self.zrange = xrange, yrange, zrange
         self.K = np.load(intrinsics_path)                   # fail-loud: no default intrinsics
         self.resolution = tuple(resolution)
@@ -67,10 +69,12 @@ class DecenteredLookAtPoser:                                # NEW
         self.margin = np.radians(margin_deg)
         self.max_roll = np.radians(max_roll_deg)
         self.normals = frustum_normals(self.K, self.resolution)
+        self.sampler = resolve_offset_sampler(offset_sampler)
 
     def __call__(self, num_frames: int) -> np.ndarray:
         # ONE call, BEFORE any decentering draw: identical position stream to LookAtPoser
-        offsets = generate_random_offsets(self.xrange, self.yrange, self.zrange, num_frames)
+        offsets = generate_random_offsets(self.xrange, self.yrange, self.zrange,
+                                          num_frames, sampler=self.sampler)
         return np.array([self._decentered(off) for off in offsets])
 
     def _decentered(self, off: np.ndarray) -> np.ndarray:
