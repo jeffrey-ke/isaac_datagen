@@ -283,6 +283,31 @@ def _parser() -> argparse.ArgumentParser:
             "already rendered/baked/squashed. Different lists against an existing\n"
             "manifest is a hard error -- use a new root, or --force."
         ),
+        epilog=(
+            "flags that change HOW MUCH / WHAT KIND of data gets generated\n"
+            "(defaults + types are on each flag's own entry above):\n"
+            "\n"
+            "  poser / camera-offset distribution (WHAT KIND)\n"
+            "    --pool-poser                  LookAtPoser (centered) | DecenteredLookAtPoser\n"
+            "    --pool-offset-sampler         uniform_offsets | log_uniform_offsets (near-biased)\n"
+            "    --pool-offset-sampler-floor   required with log_uniform_offsets only\n"
+            "\n"
+            "  base render volume (HOW MUCH)\n"
+            "    --base-num-dirs               render dirs\n"
+            "    --base-num-targets            capture targets per scene\n"
+            "    --base-num-frames             frames per dir\n"
+            "    --base-replicas               object copies placed per scene\n"
+            "\n"
+            "  pool render volume (HOW MUCH -- one dir per ingest class)\n"
+            "    --pool-frames                 frames per pool dir\n"
+            "\n"
+            "  test render volume (HOW MUCH)\n"
+            "    --test-store-num-frames       frames, store scene\n"
+            "    --test-composed-num-dirs      composed render dirs\n"
+            "    --test-composed-num-targets   capture targets per composed scene\n"
+            "    --test-composed-num-frames    frames per composed dir\n"
+            "    --test-composed-replicas      object copies placed per composed scene"
+        ),
     )
     ini.add_argument("base_assets",
                      help="newline-separated reference-image paths; line count = N (base classes)")
