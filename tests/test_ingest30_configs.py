@@ -1,9 +1,10 @@
 import yaml
+import pytest
 
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_configs import (
     base_config, pool_config, test_store_config, test_composed_config,
-    smoke_config, write_all,
+    smoke_config, write_all, POOL_POSERS,
 )
 
 ARGS = dict(
@@ -51,6 +52,43 @@ def test_pool_config(tmp_path):
     assert {"name": "DisablePhysics", "args": {"pattern": "snack031*"}} \
         in cfg["scene_builder_args"]["mutations"]
     assert cfg["objects_path"] == [str(sa.ingest_catalog)]
+
+
+def test_pool_config_default_poser_unchanged(tmp_path):
+    sa = sa_for(tmp_path)                      # pool_poser defaults to "LookAtPoser"
+    cfg = pool_config(sa, "snack031")
+    assert cfg["pose_generation_policy"] == "LookAtPoser"
+    assert cfg["pose_generation_policy_args"] == {
+        "xrange": [0.3, 2.0], "yrange": [-2.0, 2.0], "zrange": [-0.7, 0.7]}
+
+
+def test_pool_config_decentered_poser(tmp_path):
+    import dataclasses
+
+    sa = sa_for(tmp_path)
+    sa = dataclasses.replace(sa, pool_poser="DecenteredLookAtPoser",
+                             pool_object_radius={"snack031": 0.22, "flour001": 0.31})
+    cfg = pool_config(sa, "snack031")
+    assert cfg["pose_generation_policy"] == "DecenteredLookAtPoser"
+    args = cfg["pose_generation_policy_args"]
+    assert args["xrange"] == [0.3, 2.0] and args["yrange"] == [-2.0, 2.0] and args["zrange"] == [-0.7, 0.7]
+    assert args["object_radius"] == 0.22       # snack031's radius, not flour001's
+    assert args["intrinsics_path"] == "zed_K.npy"
+    assert args["resolution"] == [1920, 1080]
+    assert args["margin_deg"] == 1.0 and args["max_roll_deg"] == 15.0
+
+
+def test_pool_poser_unknown_fails_loud(tmp_path):
+    import dataclasses
+
+    sa = sa_for(tmp_path)
+    sa = dataclasses.replace(sa, pool_poser="TotallyMadeUp")
+    with pytest.raises(AssertionError, match="TotallyMadeUp"):
+        pool_config(sa, "snack031")
+
+
+def test_pool_posers_registry_has_both():
+    assert set(POOL_POSERS) == {"LookAtPoser", "DecenteredLookAtPoser"}
 
 
 def test_base_config(tmp_path):

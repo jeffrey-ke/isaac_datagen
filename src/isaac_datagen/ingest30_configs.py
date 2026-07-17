@@ -39,6 +39,25 @@ def _halo(xr, yr, zr):
                 pose_generation_policy_args=dict(xrange=xr, yrange=yr, zrange=zr))
 
 
+def _decentered_halo(xr, yr, zr, radii, cls):
+    return dict(pose_generation_policy="DecenteredLookAtPoser",
+                pose_generation_policy_args=dict(
+                    xrange=xr, yrange=yr, zrange=zr,
+                    intrinsics_path=_COMMON["intrinsics_path"], resolution=[1920, 1080],
+                    object_radius=radii[cls], margin_deg=1.0, max_roll_deg=15.0))
+
+
+POOL_POSERS = {"LookAtPoser": lambda xr, yr, zr, radii, cls: _halo(xr, yr, zr),
+               "DecenteredLookAtPoser": _decentered_halo}
+
+
+def _pool_poser(sa: ScriptArgs, cls: str) -> dict:
+    assert sa.pool_poser in POOL_POSERS, \
+        f"unknown pool_poser {sa.pool_poser!r} — valid: {sorted(POOL_POSERS)}"
+    return POOL_POSERS[sa.pool_poser]([0.3, 2.0], [-2.0, 2.0], [-0.7, 0.7],
+                                       sa.pool_object_radius, cls)
+
+
 def _disable_physics(classes):
     return [{"name": "DisablePhysics", "args": {"pattern": f"{c}*"}} for c in classes]
 
@@ -66,7 +85,7 @@ def base_config(sa: ScriptArgs, base_classes: list[str]) -> dict:
 
 
 def pool_config(sa: ScriptArgs, cls: str) -> dict:
-    return _COMMON | _JITTERED_LIGHTS | _halo([0.3, 2.0], [-2.0, 2.0], [-0.7, 0.7]) | dict(
+    return _COMMON | _JITTERED_LIGHTS | _pool_poser(sa, cls) | dict(
         seed=sa.seeds.pools, idx=0,
         num_targets=None, num_frames=sa.pool_frames,
         dataset_dir=f"{sa.root}/datasets/pools/{cls}-1inst",
