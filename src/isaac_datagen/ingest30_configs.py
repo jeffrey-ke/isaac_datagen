@@ -40,6 +40,7 @@ def _halo(xr, yr, zr):
 
 
 def _decentered_halo(xr, yr, zr, radii, cls):
+    assert cls in radii, f"no pool_object_radius computed for class {cls!r} -- have: {sorted(radii)}"
     return dict(pose_generation_policy="DecenteredLookAtPoser",
                 pose_generation_policy_args=dict(
                     xrange=xr, yrange=yr, zrange=zr,

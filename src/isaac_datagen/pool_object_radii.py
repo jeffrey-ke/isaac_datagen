@@ -15,8 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]   # isaac_datagen/ (has pypro
 # Command substitution `$(...)` blocks until mesh_radius fully finishes and captures its stdout
 # (trailing newline stripped by the shell) before the single printf writes the whole line at once.
 _MESH_RADIUS_LINE = (
-    r'printf "%s\t%s\n" "$1" '
-    r'"$(uv run --with usd-core python -m isaac_datagen.mesh_radius "$1")"'
+    r'out="$(uv run --with usd-core python -m isaac_datagen.mesh_radius "$1")"; st=$?; '
+    r'printf "%s\t%s\n" "$1" "$out"; exit $st'
 )
 
 

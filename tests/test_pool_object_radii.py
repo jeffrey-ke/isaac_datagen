@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 
@@ -80,3 +82,31 @@ def test_compute_pool_object_radii_end_to_end(tmp_path):
     for cls, scale in scales.items():
         expected = float(np.linalg.norm(scale)) * 2
         assert radii[cls] == pytest.approx(expected, rel=1e-4)
+
+
+def _write_empty_usdz(usda_path, usdz_path):
+    """A geometry-less stage -- mesh_radius's own empty-bbox assert fires on this
+    (see test_mesh_radius_fails_loud_on_geometry_less_stage), which is exactly the
+    kind of crashed-worker case the xargs wrapper must not swallow."""
+    from pxr import Usd, UsdGeom, UsdUtils
+
+    stage = Usd.Stage.CreateNew(str(usda_path))
+    UsdGeom.Xform.Define(stage, "/W")          # no mesh geometry at all
+    stage.GetRootLayer().Save()
+    ok = UsdUtils.CreateNewUsdzPackage(str(usda_path), str(usdz_path))
+    assert ok, f"failed to package {usdz_path}"
+
+
+def test_compute_pool_object_radii_raises_on_crashed_worker(tmp_path):
+    from isaac_datagen.pool_object_radii import compute_pool_object_radii
+
+    catalog = tmp_path / "ingest"
+    _write_meta(catalog, ["snack031", "cereal001"])
+    usd_dir = catalog / "usd_path"
+    usd_dir.mkdir(parents=True)
+    _write_usdz(tmp_path / "snack031.usda", usd_dir / "usd_path_0000.usdz", (0.05, 0.05, 0.1))
+    _write_empty_usdz(tmp_path / "cereal001.usda", usd_dir / "usd_path_0001.usdz")
+
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        compute_pool_object_radii(catalog, nproc=2)
+    assert "empty/invalid bounding box" in exc_info.value.stderr

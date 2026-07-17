@@ -87,6 +87,16 @@ def test_pool_poser_unknown_fails_loud(tmp_path):
         pool_config(sa, "snack031")
 
 
+def test_decentered_poser_missing_radius_fails_loud(tmp_path):
+    import dataclasses
+
+    sa = sa_for(tmp_path)
+    sa = dataclasses.replace(sa, pool_poser="DecenteredLookAtPoser",
+                             pool_object_radius={"flour001": 0.31})   # snack031 missing
+    with pytest.raises(AssertionError, match="snack031"):
+        pool_config(sa, "snack031")
+
+
 def test_pool_posers_registry_has_both():
     assert set(POOL_POSERS) == {"LookAtPoser", "DecenteredLookAtPoser"}
 

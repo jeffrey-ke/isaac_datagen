@@ -46,8 +46,6 @@ def test_mesh_radius_ignores_translation(tmp_path):
 
 
 def test_main_prints_bare_radius(tmp_path, monkeypatch, capsys):
-    import pytest as _pytest
-
     from isaac_datagen import mesh_radius as mr
 
     usd_path = tmp_path / "obj.usda"
@@ -58,7 +56,7 @@ def test_main_prints_bare_radius(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out.strip()
     # bare float only -- no path echoed; associating it back with the input path is the
     # xargs/shell wrapper's job (Task 3), not this tool's
-    assert float(out) == _pytest.approx(0.4582575763241539, rel=1e-5)
+    assert float(out) == pytest.approx(0.4582575763241539, rel=1e-5)
 
 
 def test_mesh_radius_fails_loud_on_geometry_less_stage(tmp_path):
