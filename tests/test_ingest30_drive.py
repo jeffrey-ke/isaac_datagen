@@ -149,7 +149,8 @@ def test_init_refuses_over_cap_before_writing_manifest(tmp_path, monkeypatch):
     bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
     a = argparse.Namespace(
         root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
-        descriptor="D", descriptor_config=str(bake_cfg),
+        descriptor="D", descriptor_config=str(bake_cfg), pool_poser="LookAtPoser",
+        pool_offset_sampler="uniform_offsets", pool_offset_sampler_floor=None,
         seed_base=1, seed_pools=2, seed_test=3,
         base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
         pool_frames=3, test_store_num_frames=1,
