@@ -191,6 +191,22 @@ def deactivate_remaining_products(store, spec) -> int:
     return len(removed)
 
 
+def freeze_physics(stage, targets) -> int:
+    """Disable rigid bodies under every inserted wrapper. Store-extracted sources
+    (store_prim in meta) bake one and must yield >=1; blender-built assets have no
+    physics APIs and legitimately yield none."""
+    from pxr import Usd
+    from isaac_datagen.isaac_utils import disable_rigid_body
+    frozen = 0
+    for t in targets:
+        disabled = [q for q in Usd.PrimRange(stage.GetPrimAtPath(t.prim_path))
+                    if disable_rigid_body(q)]
+        assert disabled or "store_prim" not in t.obj.meta, \
+            f"store-extracted {t.obj.meta['name']}: no rigid body disabled under {t.prim_path}"
+        frozen += len(disabled)
+    return frozen
+
+
 class RemoveClass:
     def __init__(self, pattern: str):
         assert pattern, "RemoveClass needs a non-empty class glob"
