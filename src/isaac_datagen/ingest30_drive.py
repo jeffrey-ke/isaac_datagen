@@ -96,6 +96,10 @@ def score_commands(root, label, protocol, steps) -> list[Cmd]:
     return [_seg("ingest30-score", root, label, "--protocol", protocol, *extra)]
 
 
+def curves_commands(root) -> list[Cmd]:
+    return [_seg("ingest30-curves", root)]
+
+
 def run_cmd(cmd: Cmd, log) -> None:
     env = {k: v for k, v in os.environ.items()
            if not (cmd.drop_pythonpath and k == "PYTHONPATH")}
@@ -244,7 +248,12 @@ def run_score(a) -> None:
     run_stage("score", a.label, score_commands(a.root, a.label, a.protocol, a.steps), a.root)
 
 
-VERBS = {"init": run_init, "arm": run_arm, "score": run_score}
+def run_curves(a) -> None:
+    assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
+    run_stage("curves", "all", curves_commands(a.root), a.root)
+
+
+VERBS = {"init": run_init, "arm": run_arm, "score": run_score, "curves": run_curves}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -252,7 +261,7 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="meta", **raw,
         description=(
-            "ingest30 experiment driver: init -> arm -> score.\n\n"
+            "ingest30 experiment driver: init -> arm -> score -> curves.\n\n"
             "Run from isaac_datagen/ as `uv run meta ...`. Output appends to\n"
             "<root>/logs/<verb>-<stage>.log. Every verb except init needs an inited\n"
             "root (<root>/manifest.yaml). GPU verbs print nvidia-smi memory used\n"
@@ -267,7 +276,8 @@ def _parser() -> argparse.ArgumentParser:
             "      src/segmentation/configs/ingest30/ingest-gligen.yaml <root> --allow-dirty\n"
             "  meta arm retrained src/segmentation/configs/ingest30/base-train-closed.yaml"
             " --all-data <root>\n"
-            "  meta score gligen <root>"
+            "  meta score gligen <root>\n"
+            "  meta curves <root>"
         ),
     )
     sub = p.add_subparsers(dest="verb", required=True)
@@ -418,6 +428,16 @@ def _parser() -> argparse.ArgumentParser:
                      help="scoring protocol registered in PROTOCOLS (default: %(default)s)")
     sco.add_argument("--steps", default=None,
                      help="comma-separated step tags to score, e.g. base,00,05 (default: all)")
+
+    cur = sub.add_parser(
+        "curves", **raw,
+        help="draw per-metric ingestion-curve figures from every scored arm",
+        description=(
+            "Band+line figures from <root>/scores/*/scores.csv into\n"
+            "<root>/scores/curves/ (one PNG per metric). Plots every label found."
+        ),
+    )
+    cur.add_argument("root")
 
     return p
 

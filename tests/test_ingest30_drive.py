@@ -7,7 +7,7 @@ import yaml
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_drive import (
     VERBS, _init_manifest, _unpack_arm_positionals, arm_commands, parse_args,
-    score_commands, stage_bake, stage_flatten, stage_render,
+    curves_commands, score_commands, stage_bake, stage_flatten, stage_render,
 )
 
 MANIFEST = dict(
@@ -85,6 +85,17 @@ def test_score_commands():
     assert cmd.drop_pythonpath                                 # segmentation needs clean env
 
 
+def test_curves_commands():
+    (cmd,) = curves_commands("/r")
+    assert " ".join(cmd.argv).endswith("ingest30-curves /r")
+    assert cmd.drop_pythonpath                                 # segmentation needs clean env
+
+
+def test_curves_cli_parsing():
+    a = parse_args(["curves", "/r"])
+    assert a.verb == "curves" and a.root == "/r"
+
+
 def test_flatten_commands(tmp_path):
     (cmd,) = stage_flatten(sa_(tmp_path))
     assert " ".join(cmd.argv).endswith(f"ingest30-flatten {tmp_path}")
@@ -92,7 +103,7 @@ def test_flatten_commands(tmp_path):
 
 
 def test_verb_registry_complete():
-    assert list(VERBS) == ["init", "arm", "score"]
+    assert list(VERBS) == ["init", "arm", "score", "curves"]
 
 
 def test_arm_cli_parsing():
