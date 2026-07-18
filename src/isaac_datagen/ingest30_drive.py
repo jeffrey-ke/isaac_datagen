@@ -161,6 +161,11 @@ def _init_manifest(a) -> ScriptArgs:
             f"{manifest} exists with pool_offset_sampler={sa.pool_offset_sampler!r} — different "
             f"--pool-offset-sampler needs a new root (or --force)"
         )
+        assert sa.test_store_fit_threshold == a.test_store_fit_threshold, (
+            f"{manifest} exists with test_store_fit_threshold={sa.test_store_fit_threshold!r} — "
+            f"different --test-store-fit-threshold {a.test_store_fit_threshold!r} needs a new root "
+            "(or --force)"
+        )
         print("[meta] init resuming from existing manifest")
         return sa
     assert not (root / "datasets").exists(), \

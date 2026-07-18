@@ -137,6 +137,7 @@ def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r, scale=1.0) -> np.nd
 def fit_scale(site: ProductSite, ext_r, grasp_r, threshold) -> float:
     """Uniform shrink bringing the replacement's worst-fitting axis to threshold x the
     occupant's extent (all 3 axes; occupant height is the headroom proxy). Never enlarges."""
+    assert threshold > 0, f"fit_threshold must be > 0: {threshold}"
     r_rel = site.grasp[:3, :3] @ grasp_r[:3, :3].T   # replacement-local -> site-local
     assert abs(r_rel[2, 2]) > 0.99, \
         f"grasp alignment not a pure yaw (front-convention violation):\n{r_rel}"

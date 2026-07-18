@@ -85,6 +85,11 @@ def test_fit_scale_threshold_scales_allowance():
     assert fit_scale(_site(), np.array([0.1, 0.2, 0.3]), np.eye(4), 0.5) == pytest.approx(0.5)
 
 
+def test_fit_scale_rejects_nonpositive_threshold():
+    with pytest.raises(AssertionError, match="must be > 0"):
+        fit_scale(_site(), np.array([0.1, 0.2, 0.3]), np.eye(4), 0)
+
+
 def test_fit_scale_rejects_tilted_grasp():
     c, s = np.cos(np.deg2rad(30)), np.sin(np.deg2rad(30))
     rx30 = np.array([[1., 0., 0.], [0., c, -s], [0., s, c]])
