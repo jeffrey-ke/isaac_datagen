@@ -223,13 +223,13 @@ _ORIENTATION = {"name": "AlignGraspFronts", "args": {"azimuth_deg": -90}}
 
 def test_base_config_fronts_objects(tmp_path):
     sa = sa_for(tmp_path)
-    cfg = base_config(sa, ["cereal001"])
+    cfg = base_config(sa)
     assert cfg["scene_builder_args"]["orientation"] == _ORIENTATION
 
 
 def test_composed_config_fronts_objects(tmp_path):
     sa = sa_for(tmp_path)
-    cfg = test_composed_config(sa, ["cereal001", "snack031"])
+    cfg = test_composed_config(sa)
     assert cfg["scene_builder_args"]["orientation"] == _ORIENTATION
 
 
