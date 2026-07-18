@@ -204,6 +204,7 @@ def _init_manifest(a) -> ScriptArgs:
         store_site_catalog=site_catalog,
         test_store_replicas=replicas,
         test_store_num_targets=a.test_store_num_targets,
+        test_store_fit_threshold=a.test_store_fit_threshold,
         pool_poser=a.pool_poser, pool_object_radius=pool_object_radius,
         pool_offset_sampler=pool_offset_sampler,
     )
@@ -315,6 +316,7 @@ def _parser() -> argparse.ArgumentParser:
             "    --store-site-catalog          curated shelf-site catalog for the store leg (WHAT KIND)\n"
             "    --test-store-replicas         copies per class zipped onto store sites (default S // M)\n"
             "    --test-store-num-targets      store vantage points; <0 -> every placed object\n"
+            "    --test-store-fit-threshold    slot-fit cap; worst axis shrunk to this x occupant extent\n"
             "    --test-store-num-frames       frames, store scene\n"
             "    --test-composed-num-dirs      composed render dirs\n"
             "    --test-composed-num-targets   capture targets per composed scene\n"
@@ -342,6 +344,9 @@ def _parser() -> argparse.ArgumentParser:
     ini.add_argument("--test-store-num-targets", type=int, default=20,
                      help="camera vantage points per store dir; <0 -> null = every placed "
                           "object, one frame each (default: %(default)s)")
+    ini.add_argument("--test-store-fit-threshold", type=float, default=1.0,
+                     help="store slot-fit cap: max (object extent / occupant extent) on the "
+                          "worst axis before a uniform shrink; shrink-only (default: %(default)s)")
     ini.add_argument("--force", action="store_true",
                      help="rebuild tool-owned regenerables (catalogs/{base,ingest}, flat_test, "
                           "configs/datagen); refuses if datasets/ exists -- delete stale "

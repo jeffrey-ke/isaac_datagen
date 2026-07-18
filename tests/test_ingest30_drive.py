@@ -168,6 +168,7 @@ def test_init_refuses_over_cap_before_writing_manifest(tmp_path, monkeypatch):
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=5, test_store_num_targets=20,
+        test_store_fit_threshold=1.0,
     )
     with pytest.raises(AssertionError, match="exceeds the 2 curated store sites"):
         _init_manifest(a)                              # 3 classes x 5 = 15 > 2 sites
@@ -202,6 +203,7 @@ def test_init_force_semantics(tmp_path, monkeypatch):
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=None, test_store_num_targets=20,
+        test_store_fit_threshold=1.0,
     )
 
     (tmp_path / "datasets").mkdir()                    # (a) renders present -> refuse
@@ -250,7 +252,7 @@ def test_init_descriptor_bake_config_mismatch(tmp_path, monkeypatch):
             test_composed_num_dirs=1, test_composed_num_targets=1,
             test_composed_num_frames=1, test_composed_replicas=1,
             store_site_catalog=str(tmp_path), test_store_replicas=None,
-            test_store_num_targets=20,
+            test_store_num_targets=20, test_store_fit_threshold=1.0,
         )
 
     with pytest.raises(AssertionError, match="descriptor 'E' != bake config .* name 'D'"):
@@ -286,7 +288,7 @@ def test_init_manifest_default_poser_skips_radius(tmp_path, monkeypatch):
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=None,
-        test_store_num_targets=1,
+        test_store_num_targets=1, test_store_fit_threshold=1.0,
     )
     sa = _init_manifest(a)
     assert sa.pool_poser == "LookAtPoser"
@@ -321,7 +323,7 @@ def test_init_manifest_decentered_poser_computes_radii(tmp_path, monkeypatch):
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=None,
-        test_store_num_targets=1,
+        test_store_num_targets=1, test_store_fit_threshold=1.0,
     )
     sa = _init_manifest(a)
     assert sa.pool_poser == "DecenteredLookAtPoser"
@@ -352,7 +354,7 @@ def test_init_resume_pool_poser_mismatch_fails_loud(tmp_path, monkeypatch):
             test_composed_num_dirs=1, test_composed_num_targets=1,
             test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=None,
-        test_store_num_targets=1,
+        test_store_num_targets=1, test_store_fit_threshold=1.0,
         )
 
     _init_manifest(a_("LookAtPoser", force=True))          # first init: fresh root
@@ -397,10 +399,37 @@ def test_init_manifest_default_offset_sampler_is_empty(tmp_path, monkeypatch):
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=None,
-        test_store_num_targets=1,
+        test_store_num_targets=1, test_store_fit_threshold=1.0,
     )
     sa = _init_manifest(a)
     assert sa.pool_offset_sampler == {}
+
+
+def test_init_manifest_fit_threshold_stored(tmp_path, monkeypatch):
+    import isaac_datagen.asset_catalogs as ac
+
+    monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
+    monkeypatch.setattr(ac, "assemble_catalog",
+                        lambda paths, dest: Path(dest).mkdir(parents=True) or
+                        (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
+
+    bake_cfg = tmp_path / "fpn.yaml"
+    bake_cfg.write_text(yaml.safe_dump({"name": "D"}))
+    a = argparse.Namespace(
+        root=str(tmp_path), base_assets="b.txt", ingest_assets="i.txt", force=True,
+        descriptor="D", descriptor_config=str(bake_cfg), pool_poser="LookAtPoser",
+        pool_offset_sampler="uniform_offsets", pool_offset_sampler_floor=None,
+        seed_base=1, seed_pools=2, seed_test=3,
+        base_num_dirs=2, base_num_targets=1, base_num_frames=1, base_replicas=1,
+        pool_frames=3, test_store_num_frames=1,
+        test_composed_num_dirs=1, test_composed_num_targets=1,
+        test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None,
+        test_store_num_targets=1, test_store_fit_threshold=0.8,
+    )
+    sa = _init_manifest(a)
+    assert sa.test_store_fit_threshold == 0.8
 
 
 def test_init_manifest_log_offset_sampler_stored(tmp_path, monkeypatch):
@@ -424,7 +453,7 @@ def test_init_manifest_log_offset_sampler_stored(tmp_path, monkeypatch):
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=None,
-        test_store_num_targets=1,
+        test_store_num_targets=1, test_store_fit_threshold=1.0,
     )
     sa = _init_manifest(a)
     assert sa.pool_offset_sampler == {"name": "log_uniform_offsets", "args": {"floor": 0.02}}
@@ -499,7 +528,7 @@ def test_init_resume_pool_offset_sampler_mismatch_fails_loud(tmp_path, monkeypat
             test_composed_num_dirs=1, test_composed_num_targets=1,
             test_composed_num_frames=1, test_composed_replicas=1,
         store_site_catalog=str(tmp_path), test_store_replicas=None,
-        test_store_num_targets=1,
+        test_store_num_targets=1, test_store_fit_threshold=1.0,
         )
 
     _init_manifest(a_("uniform_offsets", None, force=True))            # first init: fresh root
