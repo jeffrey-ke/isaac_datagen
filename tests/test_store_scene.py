@@ -21,3 +21,18 @@ def test_repopulated_scene_rejects_mutations(tmp_path):
     ))
     with pytest.raises(AssertionError, match="ignores mutations"):
         build_repopulated_store_scene(runtime, [])
+
+
+def test_repopulated_scene_requires_fit_threshold(tmp_path):
+    store_usd = tmp_path / "fake.usd"
+    store_usd.write_text("")
+    runtime = types.SimpleNamespace(scene_builder_args=dict(
+        store_usd=str(store_usd),
+        product_patterns=["model_*"],
+        grasp_frame_policy="FixedFaceGrasp",
+        grasp_frame_policy_args={"face": "-Y"},
+        site_catalog="some/keep/catalog",
+        mutations=[],                          # passes the mutations gate; trips the next one
+    ))
+    with pytest.raises(AssertionError, match="fit_threshold"):
+        build_repopulated_store_scene(runtime, [])

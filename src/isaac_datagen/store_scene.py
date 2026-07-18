@@ -23,6 +23,7 @@ class StoreSceneSpec:
     mutations: list = field(default_factory=list)
     require_tracked_only: list = field(default_factory=list)
     site_catalog: str = ""       # curated site catalog; required by build_repopulated_store_scene
+    fit_threshold: float | None = None   # slot-fit cap; required by build_repopulated_store_scene
 
     def __post_init__(self):
         assert Path(self.store_usd).exists(), f"store_usd missing: {self.store_usd}"
@@ -117,6 +118,8 @@ def build_repopulated_store_scene(runtime, objects) -> SceneHandle:
     assert spec.site_catalog, "build_repopulated_store_scene needs scene_builder_args.site_catalog"
     assert not spec.mutations, \
         "build_repopulated_store_scene ignores mutations (sites drive placement); leave the list empty"
+    assert spec.fit_threshold is not None, \
+        "build_repopulated_store_scene needs scene_builder_args.fit_threshold (slot-fit cap)"
     store = _load_store_with_lights(spec, runtime)
     sites = store_mutations.load_sites(spec.site_catalog)
     assert len(objects) <= len(sites), (
@@ -124,8 +127,15 @@ def build_repopulated_store_scene(runtime, objects) -> SceneHandle:
         f"reduce the store ReplicateFilter count, or use the composed scene (no site limit)")
     stage = store.GetStage()
     create_empty("StoreSwaps", "/World")
-    targets = [store_mutations.replace_instance(stage, store, site.store_prim, obj, site.grasp)
+    targets = [store_mutations.replace_instance(stage, store, site.store_prim, obj, site.grasp,
+                                                fit_threshold=spec.fit_threshold)
                for site, obj in zip(sites, objects)]            # queue order == placement order
     store_mutations.deactivate_remaining_products(store, spec)  # strip unused sites + non-catalog SKUs
+    frozen = store_mutations.freeze_physics(stage, targets)     # inserts must not simulate during capture
+    scaled = sorted(t.scale for t in targets if t.scale < 1.0)
+    if scaled:
+        print(f"[scene] scaled {len(scaled)}/{len(targets)} inserts "
+              f"(min s={scaled[0]:.2f}, max r={spec.fit_threshold / scaled[0]:.2f})", flush=True)
+    print(f"[scene] froze {frozen} rigid body(ies) across {len(targets)} inserts", flush=True)
     print(f"[scene] repopulated {len(targets)}/{len(sites)} sites", flush=True)
     return _finalize_store_scene(store, spec, targets, runtime)
