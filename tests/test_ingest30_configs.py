@@ -172,6 +172,7 @@ def test_store_config_repopulates(tmp_path):
     assert cfg["seed"] == 3201
     assert cfg["scene_builder"] == "build_repopulated_store_scene"
     assert cfg["scene_builder_args"]["site_catalog"] == sa.store_site_catalog
+    assert cfg["scene_builder_args"]["fit_threshold"] == 1.0     # ScriptArgs default
     assert cfg["scene_builder_args"]["mutations"] == []          # repopulation, not RemoveUntrackedProducts
     assert cfg["num_targets"] == 20
     names = [f["name"] for f in cfg["filter_specs"]]
@@ -241,3 +242,10 @@ def test_pool_and_store_configs_have_no_orientation(tmp_path):
     sa = sa_for(tmp_path)
     assert "orientation" not in pool_config(sa, "snack031")["scene_builder_args"]
     assert "orientation" not in test_store_config(sa, ["snack031"])["scene_builder_args"]
+
+
+def test_store_config_fit_threshold_from_manifest(tmp_path):
+    sa = sa_for(tmp_path)
+    sa.test_store_fit_threshold = 0.8
+    cfg = test_store_config(sa, ["cereal001", "flour001", "sauces001", "snack031"])
+    assert cfg["scene_builder_args"]["fit_threshold"] == 0.8

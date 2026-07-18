@@ -133,6 +133,7 @@ def test_store_config(sa: ScriptArgs, classes: list[str]) -> dict:
             "grasp_frame_policy": "FixedFaceGrasp",
             "grasp_frame_policy_args": {"face": "-Y"},
             "site_catalog": sa.store_site_catalog,
+            "fit_threshold": sa.test_store_fit_threshold,
             "mutations": [],
             "require_tracked_only": PRODUCT_PATTERNS,
         },
