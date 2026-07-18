@@ -2,7 +2,9 @@ import numpy as np
 import pytest
 import yaml
 
-from isaac_datagen.store_mutations import ProductSite, Site, _orthonormal_rotation, fit_scale, load_sites
+from isaac_datagen.store_mutations import (
+    ProductSite, Site, _orthonormal_rotation, fit_scale, load_sites, replacement_pose,
+)
 
 KEEP = "assets/optflow_objects/store001-optflow-objects-keep"   # via the assets symlink; cwd = isaac_datagen
 
@@ -88,3 +90,12 @@ def test_fit_scale_rejects_tilted_grasp():
     rx30 = np.array([[1., 0., 0.], [0., c, -s], [0., s, c]])
     with pytest.raises(AssertionError, match="pure yaw"):
         fit_scale(_site(grasp_rot=rx30), np.array([0.1, 0.1, 0.1]), np.eye(4), 1.0)
+
+
+def test_replacement_pose_scaled_bottom_center_anchors_to_slot():
+    site = _site(ext=(0.2, 0.2, 0.2))                     # slot bottom-center (0.1, 0.1, 0)
+    lo_r, hi_r = np.zeros(3), np.array([0.2, 0.2, 0.4])   # object bottom-center (0.1, 0.1, 0)
+    for s in (1.0, 0.5):
+        pose = replacement_pose(site, lo_r, hi_r, np.eye(4), scale=s)
+        placed_bc = pose[:3, 3] + pose[:3, :3] @ (s * np.array([0.1, 0.1, 0.0]))
+        assert np.allclose(placed_bc, [0.1, 0.1, 0.0])

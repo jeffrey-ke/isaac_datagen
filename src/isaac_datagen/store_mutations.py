@@ -17,6 +17,7 @@ from isaac_datagen.objects import OptFlowObject
 class CaptureTarget:
     obj: OptFlowObject
     prim_path: str
+    scale: float = 1.0        # slot-fit shrink authored on the wrapper; 1.0 = untouched
 
 
 def get(name):
@@ -124,12 +125,12 @@ def measure_site(stage, prim, grasp_fn) -> ProductSite:
                        l2w=get_target2world([v0_path])[0], grasp=grasp_fn(lo, hi, cls))
 
 
-def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r) -> np.ndarray:
+def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r, scale=1.0) -> np.ndarray:
     rot = _orthonormal_rotation(site.l2w) @ site.grasp[:3, :3] @ grasp_r[:3, :3].T
     pose = np.eye(4)
     pose[:3, :3] = rot
     pose[:3, 3] = (site.l2w @ np.append(_bottom_center(site.lo, site.hi), 1.0))[:3] \
-                  - rot @ _bottom_center(lo_r, hi_r)
+                  - rot @ (scale * _bottom_center(lo_r, hi_r))
     return pose
 
 
@@ -145,19 +146,30 @@ def fit_scale(site: ProductSite, ext_r, grasp_r, threshold) -> float:
     return float(min(1.0, threshold / (repl / slot).max()))
 
 
-def insert_replacement(stage, src: OptFlowObject, site: ProductSite) -> CaptureTarget:
+def insert_replacement(stage, src: OptFlowObject, site: ProductSite,
+                       threshold: float | None = None) -> CaptureTarget:
+    from pxr import UsdGeom
     from isaac_datagen.capture import set_prim_pose
-    from isaac_datagen.isaac_utils import untransformed_bbox_range
+    from isaac_datagen.isaac_utils import set_transform, untransformed_bbox_range
     from isaac_datagen.scene import add_wrapped_reference
     name = f"{src.meta['name']}_at_{site.name}"
     wrapper = add_wrapped_reference(at_parent="/World/StoreSwaps",
                                     name=name, usd_path=src.usd_path)
-    lo_r, hi_r = _bbox(untransformed_bbox_range(stage.GetPrimAtPath(wrapper)))
-    set_prim_pose(wrapper, replacement_pose(site, lo_r, hi_r, src.grasp_point))
-    return CaptureTarget(dataclasses.replace(src, meta={**src.meta, "name": name}), wrapper)
+    lo_r, hi_r = _bbox(untransformed_bbox_range(stage.GetPrimAtPath(wrapper)))  # BEFORE any authored op
+    s = fit_scale(site, hi_r - lo_r, src.grasp_point, threshold) if threshold is not None else 1.0
+    set_prim_pose(wrapper, replacement_pose(site, lo_r, hi_r, src.grasp_point, s))  # pose FIRST, scale second
+    if s < 1.0:
+        set_transform(stage.GetPrimAtPath(wrapper), scale=(s, s, s))
+        ops = [op.GetOpName()
+               for op in UsdGeom.Xformable(stage.GetPrimAtPath(wrapper)).GetOrderedXformOps()]
+        assert ops == ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"], \
+            f"scale must be innermost (T-R-S), got {ops}"
+        print(f"[scene] scaled {name} at {site.name}: r={threshold / s:.2f} -> s={s:.2f}", flush=True)
+    return CaptureTarget(dataclasses.replace(src, meta={**src.meta, "name": name}), wrapper, s)
 
 
-def replace_instance(stage, store, store_prim: str, src: OptFlowObject, grasp) -> CaptureTarget:
+def replace_instance(stage, store, store_prim: str, src: OptFlowObject, grasp,
+                     fit_threshold: float | None = None) -> CaptureTarget:
     """Repopulation atom: put `src` at the curated site addressed by `store_prim`,
     aligning src's own grasp to the site's curated `grasp`. Deactivates the native product."""
     from isaac_datagen.isaac_utils import deactivate_prim
@@ -166,7 +178,7 @@ def replace_instance(stage, store, store_prim: str, src: OptFlowObject, grasp) -
     product = v0.GetParent()                          # store_prim is "<product>/v_0"
     site = measure_site(stage, product, lambda lo, hi, cls: np.asarray(grasp))
     deactivate_prim(product)
-    return insert_replacement(stage, src, site)
+    return insert_replacement(stage, src, site, threshold=fit_threshold)
 
 
 def deactivate_remaining_products(store, spec) -> int:
