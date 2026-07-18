@@ -133,6 +133,18 @@ def replacement_pose(site: ProductSite, lo_r, hi_r, grasp_r) -> np.ndarray:
     return pose
 
 
+def fit_scale(site: ProductSite, ext_r, grasp_r, threshold) -> float:
+    """Uniform shrink bringing the replacement's worst-fitting axis to threshold x the
+    occupant's extent (all 3 axes; occupant height is the headroom proxy). Never enlarges."""
+    r_rel = site.grasp[:3, :3] @ grasp_r[:3, :3].T   # replacement-local -> site-local
+    assert abs(r_rel[2, 2]) > 0.99, \
+        f"grasp alignment not a pure yaw (front-convention violation):\n{r_rel}"
+    sc = np.linalg.norm(site.l2w[:3, :3], axis=0)    # site's authored (possibly non-uniform) scale
+    slot = sc * (site.hi - site.lo)
+    repl = np.abs(r_rel) @ np.asarray(ext_r)         # rotated-bbox interval arithmetic
+    return float(min(1.0, threshold / (repl / slot).max()))
+
+
 def insert_replacement(stage, src: OptFlowObject, site: ProductSite) -> CaptureTarget:
     from isaac_datagen.capture import set_prim_pose
     from isaac_datagen.isaac_utils import untransformed_bbox_range
