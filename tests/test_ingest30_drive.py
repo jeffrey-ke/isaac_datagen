@@ -229,6 +229,7 @@ def test_init_manifest_default_poser_skips_radius(tmp_path, monkeypatch):
     import isaac_datagen.pool_object_radii as por
 
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
     monkeypatch.setattr(ac, "assemble_catalog",
                         lambda paths, dest: Path(dest).mkdir(parents=True) or
                         (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
@@ -248,6 +249,8 @@ def test_init_manifest_default_poser_skips_radius(tmp_path, monkeypatch):
         pool_frames=3, test_store_num_frames=1,
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None,
+        test_store_num_targets=1,
     )
     sa = _init_manifest(a)
     assert sa.pool_poser == "LookAtPoser"
@@ -259,6 +262,7 @@ def test_init_manifest_decentered_poser_computes_radii(tmp_path, monkeypatch):
     import isaac_datagen.pool_object_radii as por
 
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
     monkeypatch.setattr(ac, "assemble_catalog",
                         lambda paths, dest: Path(dest).mkdir(parents=True) or
                         (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
@@ -280,6 +284,8 @@ def test_init_manifest_decentered_poser_computes_radii(tmp_path, monkeypatch):
         pool_frames=3, test_store_num_frames=1,
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None,
+        test_store_num_targets=1,
     )
     sa = _init_manifest(a)
     assert sa.pool_poser == "DecenteredLookAtPoser"
@@ -291,6 +297,7 @@ def test_init_resume_pool_poser_mismatch_fails_loud(tmp_path, monkeypatch):
     import isaac_datagen.asset_catalogs as ac
 
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
     monkeypatch.setattr(ac, "assemble_catalog",
                         lambda paths, dest: Path(dest).mkdir(parents=True) or
                         (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
@@ -308,6 +315,8 @@ def test_init_resume_pool_poser_mismatch_fails_loud(tmp_path, monkeypatch):
             pool_frames=3, test_store_num_frames=1,
             test_composed_num_dirs=1, test_composed_num_targets=1,
             test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None,
+        test_store_num_targets=1,
         )
 
     _init_manifest(a_("LookAtPoser", force=True))          # first init: fresh root
@@ -335,6 +344,7 @@ def test_init_manifest_default_offset_sampler_is_empty(tmp_path, monkeypatch):
     import isaac_datagen.asset_catalogs as ac
 
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
     monkeypatch.setattr(ac, "assemble_catalog",
                         lambda paths, dest: Path(dest).mkdir(parents=True) or
                         (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
@@ -350,6 +360,8 @@ def test_init_manifest_default_offset_sampler_is_empty(tmp_path, monkeypatch):
         pool_frames=3, test_store_num_frames=1,
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None,
+        test_store_num_targets=1,
     )
     sa = _init_manifest(a)
     assert sa.pool_offset_sampler == {}
@@ -359,6 +371,7 @@ def test_init_manifest_log_offset_sampler_stored(tmp_path, monkeypatch):
     import isaac_datagen.asset_catalogs as ac
 
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
     monkeypatch.setattr(ac, "assemble_catalog",
                         lambda paths, dest: Path(dest).mkdir(parents=True) or
                         (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
@@ -374,6 +387,8 @@ def test_init_manifest_log_offset_sampler_stored(tmp_path, monkeypatch):
         pool_frames=3, test_store_num_frames=1,
         test_composed_num_dirs=1, test_composed_num_targets=1,
         test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None,
+        test_store_num_targets=1,
     )
     sa = _init_manifest(a)
     assert sa.pool_offset_sampler == {"name": "log_uniform_offsets", "args": {"floor": 0.02}}
@@ -429,6 +444,7 @@ def test_init_resume_pool_offset_sampler_mismatch_fails_loud(tmp_path, monkeypat
     import isaac_datagen.asset_catalogs as ac
 
     monkeypatch.setattr(ac, "read_asset_list", lambda p: [f"{p}:asset"])
+    monkeypatch.setattr(ac, "catalog_meta", lambda p: [{}] * 42)
     monkeypatch.setattr(ac, "assemble_catalog",
                         lambda paths, dest: Path(dest).mkdir(parents=True) or
                         (["zebra"] if Path(dest).name == "base" else ["apple", "kiwi"]))
@@ -446,6 +462,8 @@ def test_init_resume_pool_offset_sampler_mismatch_fails_loud(tmp_path, monkeypat
             pool_frames=3, test_store_num_frames=1,
             test_composed_num_dirs=1, test_composed_num_targets=1,
             test_composed_num_frames=1, test_composed_replicas=1,
+        store_site_catalog=str(tmp_path), test_store_replicas=None,
+        test_store_num_targets=1,
         )
 
     _init_manifest(a_("uniform_offsets", None, force=True))            # first init: fresh root
