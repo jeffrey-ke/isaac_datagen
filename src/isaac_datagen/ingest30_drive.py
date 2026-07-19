@@ -74,7 +74,7 @@ def stage_flatten(sa: ScriptArgs) -> list[Cmd]:
 
 INIT_STAGES = {"render": stage_render, "bake": stage_bake,
                "squash": stage_squash, "flatten": stage_flatten}
-GPU_STAGES = {"render"}   # bake/squash/flatten read baked products; arm/score check inline
+GPU_STAGES = {"render"}   # bake/squash/flatten read baked products; arm/test_predict check inline
 
 
 def arm_commands(root, ops, base_cfg, ingest_cfg, label, all_data, allow_dirty) -> list[Cmd]:
@@ -91,13 +91,23 @@ def arm_commands(root, ops, base_cfg, ingest_cfg, label, all_data, allow_dirty) 
             _seg("ingest30-loop", root, ops, ingest_cfg, "--label", label, *dirty)]
 
 
-def score_commands(root, label, protocol, steps) -> list[Cmd]:
+def test_gt_commands(root) -> list[Cmd]:
+    return [_seg("ingest30-test-gt", root)]
+
+
+def test_predict_commands(root, label, steps, batch_size, workers) -> list[Cmd]:
     extra = ["--steps", steps] if steps else []
-    return [_seg("ingest30-score", root, label, "--protocol", protocol, *extra)]
+    return [_seg("ingest30-test-predict", root, label,
+                 "--batch-size", str(batch_size), "--workers", str(workers), *extra)]
 
 
-def curves_commands(root) -> list[Cmd]:
-    return [_seg("ingest30-curves", root)]
+def test_score_commands(root, label, protocol, steps) -> list[Cmd]:
+    extra = ["--steps", steps] if steps else []
+    return [_seg("ingest30-test-score", root, label, "--protocol", protocol, *extra)]
+
+
+def curves_commands(root, attribution_iou) -> list[Cmd]:
+    return [_seg("ingest30-curves", root, "--attribution-iou", str(attribution_iou))]
 
 
 def run_cmd(cmd: Cmd, log) -> None:
@@ -248,18 +258,32 @@ def run_arm(a) -> None:
         run_stage("arm", f"{a.label or a.ops}-{i}", [cmd], root)
 
 
-def run_score(a) -> None:
+def run_test_gt(a) -> None:
+    assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
+    run_stage("test_gt", "all", test_gt_commands(a.root), a.root)
+
+
+def run_test_predict(a) -> None:
     assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
     subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"])
-    run_stage("score", a.label, score_commands(a.root, a.label, a.protocol, a.steps), a.root)
+    run_stage("test_predict", a.label,
+              test_predict_commands(a.root, a.label, a.steps, a.batch_size, a.workers), a.root)
+
+
+def run_test_score(a) -> None:
+    assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
+    run_stage("test_score", a.label,
+              test_score_commands(a.root, a.label, a.protocol, a.steps), a.root)
 
 
 def run_curves(a) -> None:
     assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
-    run_stage("curves", "all", curves_commands(a.root), a.root)
+    run_stage("curves", "all", curves_commands(a.root, a.attribution_iou), a.root)
 
 
-VERBS = {"init": run_init, "arm": run_arm, "score": run_score, "curves": run_curves}
+VERBS = {"init": run_init, "arm": run_arm, "test_gt": run_test_gt,
+         "test_predict": run_test_predict, "test_score": run_test_score,
+         "curves": run_curves}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -267,7 +291,8 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="meta", **raw,
         description=(
-            "ingest30 experiment driver: init -> arm -> score -> curves.\n\n"
+            "ingest30 experiment driver: init -> arm -> test_gt -> test_predict -> "
+            "test_score -> curves.\n\n"
             "Run from isaac_datagen/ as `uv run meta ...`. Output appends to\n"
             "<root>/logs/<verb>-<stage>.log. Every verb except init needs an inited\n"
             "root (<root>/manifest.yaml). GPU verbs print nvidia-smi memory used\n"
@@ -282,8 +307,10 @@ def _parser() -> argparse.ArgumentParser:
             "      src/segmentation/configs/ingest30/ingest-gligen.yaml <root> --allow-dirty\n"
             "  meta arm retrained src/segmentation/configs/ingest30/base-train-closed.yaml"
             " --all-data <root>\n"
-            "  meta score gligen <root>\n"
-            "  meta curves <root>"
+            "  meta test_gt <root>\n"
+            "  meta test_predict gligen <root>\n"
+            "  meta test_score gligen <root>\n"
+            "  meta curves <root> --attribution-iou 0.5"
         ),
     )
     sub = p.add_subparsers(dest="verb", required=True)
@@ -423,31 +450,50 @@ def _parser() -> argparse.ArgumentParser:
     arm.add_argument("--allow-dirty", action="store_true",
                      help="launch despite uncommitted submodule changes")
 
-    sco = sub.add_parser(
-        "score", **raw,
-        help="score a trained arm's checkpoint pack against flat_test",
-        description=(
-            "Score a trained arm's checkpoint pack against <root>/flat_test.\n\n"
-            "A descriptor-stamp mismatch (pack vs flat_test) refuses to score by\n"
-            "design -- re-flatten or re-bake, don't override the guard."
-        ),
+    tgt = sub.add_parser(
+        "test_gt", **raw,
+        help="write per-image all-class GT stream (RLE) from flat_test",
+        description="One GtSample per flat_test image into <root>/test_gt_masks/.\n"
+                    "Reads flat_test ONLY; refuses to overwrite an existing dir.",
     )
-    sco.add_argument("label", help="arm label used at train time")
-    sco.add_argument("root")
-    sco.add_argument("--protocol", default="solo",
+    tgt.add_argument("root")
+
+    tpr = sub.add_parser(
+        "test_predict", **raw,
+        help="batched GPU inference per checkpack -> <root>/predictions/<label>/",
+        description="The only GPU stage of scoring. Writes UNthresholded RLE\n"
+                    "prediction streams + a per-step meta.yaml. A descriptor-stamp\n"
+                    "mismatch (pack vs flat_test) refuses to predict by design.",
+    )
+    tpr.add_argument("label", help="arm label used at train time")
+    tpr.add_argument("root")
+    tpr.add_argument("--steps", default=None,
+                     help="comma-separated step tags, e.g. base,00 (also unlocks overwrite)")
+    tpr.add_argument("--batch-size", type=int, default=8)
+    tpr.add_argument("--workers", type=int, default=8)
+
+    tsc = sub.add_parser(
+        "test_score", **raw,
+        help="CPU scoring from predictions/ + test_gt_masks/ (no GPU, no checkpacks)",
+        description="Consumes <root>/predictions/<label>/ and <root>/test_gt_masks/;\n"
+                    "writes the same scores.csv / per_sample CSVs as before.",
+    )
+    tsc.add_argument("label", help="arm label used at train time")
+    tsc.add_argument("root")
+    tsc.add_argument("--protocol", default="solo",
                      help="scoring protocol registered in PROTOCOLS (default: %(default)s)")
-    sco.add_argument("--steps", default=None,
+    tsc.add_argument("--steps", default=None,
                      help="comma-separated step tags to score, e.g. base,00,05 (default: all)")
 
     cur = sub.add_parser(
         "curves", **raw,
-        help="draw per-metric ingestion-curve figures from every scored arm",
-        description=(
-            "Band+line figures from <root>/scores/*/scores.csv into\n"
-            "<root>/scores/curves/ (one PNG per metric). Plots every label found."
-        ),
+        help="metric figures + per-step confusion matrices from every scored arm",
+        description="Band/line/distribution + class-step figures into <root>/scores/curves/;\n"
+                    "per-step confusion CSV+PNG into <root>/scores/<label>/confusion/.",
     )
     cur.add_argument("root")
+    cur.add_argument("--attribution-iou", type=float, required=True,
+                     help="min IoU to attribute a kept mask to a GT instance (else 'none')")
 
     return p
 

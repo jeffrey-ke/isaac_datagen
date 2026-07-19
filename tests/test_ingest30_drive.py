@@ -7,8 +7,13 @@ import yaml
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_drive import (
     VERBS, _init_manifest, _unpack_arm_positionals, arm_commands, parse_args,
-    curves_commands, score_commands, stage_bake, stage_flatten, stage_render,
+    curves_commands, stage_bake, stage_flatten, stage_render,
 )
+# aliased: the "test_" prefix on these builder names would make pytest try
+# to collect them as test functions if imported under their own names
+from isaac_datagen.ingest30_drive import test_gt_commands as gt_commands
+from isaac_datagen.ingest30_drive import test_predict_commands as predict_commands
+from isaac_datagen.ingest30_drive import test_score_commands as score_commands
 
 MANIFEST = dict(
     root="", base_assets=[], ingest_assets=[],
@@ -79,21 +84,34 @@ def test_arm_retrained_maps_to_closed():
                      label=None, all_data=True, allow_dirty=False)
 
 
-def test_score_commands():
+def test_test_gt_commands():
+    (cmd,) = gt_commands("/r")
+    assert " ".join(cmd.argv).endswith("ingest30-test-gt /r")
+    assert cmd.drop_pythonpath                                 # segmentation needs clean env
+
+
+def test_test_predict_commands():
+    (cmd,) = predict_commands("/r", "gligen", steps=None, batch_size=8, workers=8)
+    assert " ".join(cmd.argv).endswith(
+        "ingest30-test-predict /r gligen --batch-size 8 --workers 8")
+    assert cmd.drop_pythonpath                                 # segmentation needs clean env
+
+
+def test_test_score_commands():
     (cmd,) = score_commands("/r", "gligen", "solo", steps=None)
-    assert " ".join(cmd.argv).endswith("ingest30-score /r gligen --protocol solo")
+    assert " ".join(cmd.argv).endswith("ingest30-test-score /r gligen --protocol solo")
     assert cmd.drop_pythonpath                                 # segmentation needs clean env
 
 
 def test_curves_commands():
-    (cmd,) = curves_commands("/r")
-    assert " ".join(cmd.argv).endswith("ingest30-curves /r")
+    (cmd,) = curves_commands("/r", 0.5)
+    assert " ".join(cmd.argv).endswith("ingest30-curves /r --attribution-iou 0.5")
     assert cmd.drop_pythonpath                                 # segmentation needs clean env
 
 
 def test_curves_cli_parsing():
-    a = parse_args(["curves", "/r"])
-    assert a.verb == "curves" and a.root == "/r"
+    a = parse_args(["curves", "/r", "--attribution-iou", "0.5"])
+    assert a.verb == "curves" and a.root == "/r" and a.attribution_iou == 0.5
 
 
 def test_flatten_commands(tmp_path):
@@ -103,7 +121,7 @@ def test_flatten_commands(tmp_path):
 
 
 def test_verb_registry_complete():
-    assert list(VERBS) == ["init", "arm", "score", "curves"]
+    assert list(VERBS) == ["init", "arm", "test_gt", "test_predict", "test_score", "curves"]
 
 
 def test_arm_cli_parsing():
