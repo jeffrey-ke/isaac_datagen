@@ -22,6 +22,37 @@ def cid_iid_masks(seg_hw, labels, class_to_cid):
     return iid_mask, cid_mask, frame_iid_to_name
 
 
+class IidCanonicalizer:
+    """One id per physical object: remaps sibling component ids to the first-seen id per name."""
+
+    def __init__(self):
+        self._name_to_canon: dict[str, int] = {}   # name -> first-seen id (the canonical id)
+        self._iid_to_name: dict[int, str] = {}     # raw id -> name, for the reuse guard
+
+    def canonicalize(self, iid_mask, frame_iid_to_name, iid_to_occlusion):
+        for iid, name in frame_iid_to_name.items():
+            seen = self._iid_to_name.setdefault(iid, name)
+            if seen != name:                                        # annotator id re-used for a
+                raise ValueError(                                   # different object: fail loud,
+                    f"annotator id {iid} renamed {seen!r} -> {name!r} mid-render")  # never remap
+            self._name_to_canon.setdefault(name, iid)               # first-seen id wins, forever
+        remap = {i: self._name_to_canon[n] for i, n in frame_iid_to_name.items()
+                 if self._name_to_canon[n] != i}                    # only sibling ids need moving
+        if not remap:
+            return iid_mask, frame_iid_to_name, iid_to_occlusion    # common case: nothing to do
+        t = iid_mask.as_subclass(torch.Tensor)
+        for raw, canon in remap.items():
+            t[t == raw] = canon                                     # collapse pixels onto canonical id
+        canon_names = {self._name_to_canon[n]: n
+                       for n in frame_iid_to_name.values()}         # 1:1 per-frame map
+        canon_occ = {}
+        for raw, v in iid_to_occlusion.items():
+            canon = self._name_to_canon[frame_iid_to_name[raw]]
+            if canon == raw or canon not in canon_occ:              # canonical id's own row wins;
+                canon_occ[canon] = v                                # a sibling row only fills a gap
+        return iid_mask, canon_names, canon_occ                     # occ values viz-only (spec §3)
+
+
 @dataclass
 class WriterSpec:
     render_product: object
