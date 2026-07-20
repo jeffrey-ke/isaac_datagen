@@ -12,6 +12,7 @@ from vision_core.pose_utils import instance_visibility
 
 from isaac_datagen.stereo_writer import camera_params_to_world2cam
 from isaac_datagen.reference_seg_writer import reference_catalog, obsmask_from_data, obsmask_metadata
+from isaac_datagen.isaac_utils import IidCanonicalizer
 from isaac_datagen.objects import OptFlowSample, OptFlowMetadata
 
 
@@ -33,6 +34,7 @@ class OptFlowWriter(Writer):
         self._frame_id = 0
         self._full_alpha = full_alpha
         self.iid_to_name: dict[int, str] = {}
+        self._canon = IidCanonicalizer()          # one per render: same lifetime as iid_to_name
         self._md = None
         self._ref_cache = {}
         (self.class_to_cid, self.name_to_class,
@@ -45,7 +47,8 @@ class OptFlowWriter(Writer):
 
     def write(self, data: dict):
         obsmask, frame_iid_to_name = obsmask_from_data(
-            data, self._rp_key, self.class_to_cid, full_alpha=self._full_alpha)
+            data, self._rp_key, self.class_to_cid,
+            canon=self._canon, full_alpha=self._full_alpha)   # thread the shared remap state
         self.iid_to_name.update(frame_iid_to_name)
 
         rp = data["renderProducts"][self._rp_key]
@@ -91,5 +94,7 @@ class OptFlowWriter(Writer):
         return self._md
 
     def finalize_metadata(self, directory: str | Path | None = None):
+        assert len(set(self.iid_to_name.values())) == len(self.iid_to_name), \
+            "writer contract violated: iid_to_name not 1:1"   # documents the new contract at the source
         directory = Path(directory) if directory is not None else self._render_dir
         self._optflow_metadata().serialize(0, directory)

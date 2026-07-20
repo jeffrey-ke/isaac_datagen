@@ -83,7 +83,8 @@ def _format_orphan(o: CidOrphan) -> str:
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(
+        description="Validate a render dir's obsmask iid/cid/occlusion consistency.")
     p.add_argument("render_dir", type=Path)
     args = p.parse_args()
 

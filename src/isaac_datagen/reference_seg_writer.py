@@ -12,7 +12,7 @@ import yaml
 
 from vision_core.datastructs import ObsMask, build_obsmask_metadata
 
-from isaac_datagen.isaac_utils import cid_iid_masks
+from isaac_datagen.isaac_utils import IidCanonicalizer, cid_iid_masks
 
 
 def _pil_to_tv_rgba(pil_img: PILImage.Image) -> tv_tensors.Image:
@@ -72,7 +72,7 @@ def reference_catalog(object_specs, descriptor_config_path, descriptor_device):
     return class_to_cid, name_to_class, class_to_ref, class_to_descriptors, backbone
 
 
-def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
+def obsmask_from_data(data, rp_key, class_to_cid, *, canon, full_alpha):   # canon REQUIRED — no
     rp = data["renderProducts"][rp_key]
     seg_hw = rp["instance_segmentation_fast"]["data"]
     labels = rp["instance_segmentation_fast"]["idToSemantics"]
@@ -91,8 +91,10 @@ def obsmask_from_data(data, rp_key, class_to_cid, *, full_alpha):
     )
 
     obs_rgba = composite_rgba(rp["rgb"]["data"][:, :, :3], seg_hw,
-                              frame_iid_to_name.keys(), full_alpha=full_alpha)
-    obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))
+                              frame_iid_to_name.keys(), full_alpha=full_alpha)  # raw keys: pixel set
+    obs = tv_tensors.Image(torch.from_numpy(obs_rgba).permute(2, 0, 1))         # identical either way
+    iid_mask, frame_iid_to_name, iid_to_occlusion = canon.canonicalize(    # last step: annotator
+        iid_mask, frame_iid_to_name, iid_to_occlusion)                     # tables above are raw-keyed
     return ObsMask(obs=obs, iid_mask=iid_mask, cid_mask=cid_mask,
                    iid_to_occlusion=iid_to_occlusion), frame_iid_to_name
 
@@ -125,6 +127,7 @@ class ObsMaskWriter(Writer):
         self._frame_id = 0
         self._full_alpha = full_alpha
         self.iid_to_name: dict[int, str] = {}
+        self._canon = IidCanonicalizer()          # one per render: same lifetime as iid_to_name
         from isaac_datagen import cid_iid_trace
         if not cid_iid_trace.enabled():
             cid_iid_trace.init(self._render_dir)
@@ -140,12 +143,15 @@ class ObsMaskWriter(Writer):
 
     def write(self, data: dict):
         obsmask, frame_iid_to_name = obsmask_from_data(
-            data, self._rp_key, self.class_to_cid, full_alpha=self._full_alpha)
+            data, self._rp_key, self.class_to_cid,
+            canon=self._canon, full_alpha=self._full_alpha)   # thread the shared remap state
         self.iid_to_name.update(frame_iid_to_name)
         obsmask.serialize(self._frame_id, self._render_dir)
         self._frame_id += 1
 
     def finalize_metadata(self, directory: str | Path | None = None):
+        assert len(set(self.iid_to_name.values())) == len(self.iid_to_name), \
+            "writer contract violated: iid_to_name not 1:1"   # documents the new contract at the source
         directory = Path(directory) if directory is not None else self._render_dir
         obsmask_metadata(self.class_to_cid, self.name_to_class, self.class_to_ref,
                          self.class_to_descriptors, self.iid_to_name,
