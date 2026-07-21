@@ -7,7 +7,7 @@ import yaml
 from vision_core.script_args import ScriptArgs
 from isaac_datagen.ingest30_drive import (
     VERBS, _init_manifest, _unpack_arm_positionals, arm_commands, parse_args,
-    curves_commands, stage_bake, stage_flatten, stage_render,
+    curves_commands, stage_bake, stage_flatten, stage_render, viz_commands,
 )
 # aliased: the "test_" prefix on these builder names would make pytest try
 # to collect them as test functions if imported under their own names
@@ -112,6 +112,40 @@ def test_curves_commands():
 def test_curves_cli_parsing():
     a = parse_args(["curves", "/r", "--attribution-iou", "0.5"])
     assert a.verb == "curves" and a.root == "/r" and a.attribution_iou == 0.5
+
+
+def test_curves_commands_no_viz_unchanged():
+    (cmd,) = curves_commands("/r", 0.5)
+    assert " ".join(cmd.argv).endswith("ingest30-curves /r --attribution-iou 0.5")
+
+
+def test_curves_commands_viz_class_per_label(tmp_path):
+    for label in ("closed", "gligen"):
+        (tmp_path / "predictions" / label).mkdir(parents=True)
+    cmds = curves_commands(str(tmp_path), 0.5, ["detergent009"])
+    assert len(cmds) == 3                                   # curves + 2 labels
+    assert cmds[0].argv[-2:] == ["--attribution-iou", "0.5"]
+    for cmd, label in zip(cmds[1:], ("closed", "gligen")):  # sorted label order
+        assert cmd.argv[:2] == ["bash", "-c"]
+        script = cmd.argv[-1]
+        assert script.startswith("set -o pipefail; ")
+        assert f"ingest30-class-idxs {tmp_path} detergent009" in script
+        assert f"| xargs uv run ingest30-view-sample {tmp_path} {label}" in script
+        assert f"--out {tmp_path}/scores/viz/{label}/detergent009" in script
+        assert cmd.drop_pythonpath
+
+
+def test_viz_commands_no_predictions_asserts(tmp_path):
+    with pytest.raises(AssertionError, match="test_predict"):
+        viz_commands(str(tmp_path), ["a"])
+
+
+def test_curves_cli_parsing_viz_class():
+    a = parse_args(["curves", "/r", "--attribution-iou", "0.5",
+                    "--viz-class", "a", "--viz-class", "b"])
+    assert a.viz_class == ["a", "b"]
+    a = parse_args(["curves", "/r", "--attribution-iou", "0.5"])
+    assert a.viz_class == []
 
 
 def test_flatten_commands(tmp_path):

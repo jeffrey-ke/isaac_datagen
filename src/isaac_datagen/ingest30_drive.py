@@ -1,5 +1,6 @@
 import argparse
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -106,8 +107,29 @@ def test_score_commands(root, label, protocol, steps) -> list[Cmd]:
     return [_seg("ingest30-test-score", root, label, "--protocol", protocol, *extra)]
 
 
-def curves_commands(root, attribution_iou) -> list[Cmd]:
-    return [_seg("ingest30-curves", root, "--attribution-iou", str(attribution_iou))]
+def _seg_shell(script: str) -> Cmd:
+    # a two-tool pipe needs a shell; pipefail so a failing left side fails the stage
+    return Cmd(["bash", "-c", f"set -o pipefail; {script}"], WS / "segmentation",
+               drop_pythonpath=True)
+
+
+def viz_commands(root, viz_classes) -> list[Cmd]:
+    pred_dir = Path(root) / "predictions"
+    labels = sorted(d.name for d in pred_dir.iterdir() if d.is_dir()) if pred_dir.is_dir() else []
+    assert labels, f"{root}/predictions: no labels — run test_predict before --viz-class"
+    q = shlex.quote
+    return [_seg_shell(
+                f"uv run ingest30-class-idxs {q(str(root))} {q(cls)} | "
+                f"xargs uv run ingest30-view-sample {q(str(root))} {q(label)} "
+                f"--out {q(str(Path(root) / 'scores' / 'viz' / label / cls))}")
+            for cls in viz_classes for label in labels]
+
+
+def curves_commands(root, attribution_iou, viz_classes=()) -> list[Cmd]:
+    cmds = [_seg("ingest30-curves", root, "--attribution-iou", str(attribution_iou))]
+    if viz_classes:
+        cmds += viz_commands(root, viz_classes)
+    return cmds
 
 
 def run_cmd(cmd: Cmd, log) -> None:
@@ -278,7 +300,8 @@ def run_test_score(a) -> None:
 
 def run_curves(a) -> None:
     assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
-    run_stage("curves", "all", curves_commands(a.root, a.attribution_iou), a.root)
+    run_stage("curves", "all",
+              curves_commands(a.root, a.attribution_iou, a.viz_class), a.root)
 
 
 VERBS = {"init": run_init, "arm": run_arm, "test_gt": run_test_gt,
@@ -310,7 +333,8 @@ def _parser() -> argparse.ArgumentParser:
             "  meta test_gt <root>\n"
             "  meta test_predict gligen <root>\n"
             "  meta test_score gligen <root>\n"
-            "  meta curves <root> --attribution-iou 0.5"
+            "  meta curves <root> --attribution-iou 0.5\n"
+            "  meta curves <root> --attribution-iou 0.5 --viz-class detergent009"
         ),
     )
     sub = p.add_subparsers(dest="verb", required=True)
@@ -494,6 +518,10 @@ def _parser() -> argparse.ArgumentParser:
     cur.add_argument("root")
     cur.add_argument("--attribution-iou", type=float, required=True,
                      help="min IoU to attribute a kept mask to a GT instance (else 'none')")
+    cur.add_argument("--viz-class", action="append", default=[],
+                     help="also render per-sample prediction strips for this class, "
+                          "every predicted label, into <root>/scores/viz/ "
+                          "(repeatable; needs predictions/ from test_predict)")
 
     return p
 
