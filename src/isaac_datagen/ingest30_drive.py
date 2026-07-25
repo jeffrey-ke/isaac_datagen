@@ -77,15 +77,15 @@ INIT_STAGES = {"render": stage_render, "bake": stage_bake,
 GPU_STAGES = {"render"}   # bake/squash/flatten read baked products; arm/test_predict check inline
 
 
-def arm_commands(root, ops, base_cfg, ingest_cfg, label, all_data, allow_dirty) -> list[Cmd]:
+def arm_commands(root, ops, base_cfg, ingest_cfg, label, sizes, allow_dirty) -> list[Cmd]:
     dirty = ["--allow-dirty"] if allow_dirty else []
-    if ops == "retrained":                       # spec §10: closed ops, base+pools, no loop
-        assert ingest_cfg is None and all_data, \
-            "retrained takes ONE config and implies --all-data (no ingest loop)"
-        return [_seg("ingest30-base-train", root, "closed", base_cfg,
-                     "--label", label or "retrained", "--all-data", *dirty)]
+    if ops == "retrained":            # closed ops, from-scratch at each catalog size
+        assert ingest_cfg is None, "retrained takes ONE config (no ingest loop)"
+        assert sizes, "retrained requires --sizes (e.g. --sizes 10,20,30)"
+        return [_seg("ingest30-retrain-loop", root, base_cfg, "--sizes", sizes,
+                     "--label", label or "retrained", *dirty)]
     assert ingest_cfg is not None, f"arm {ops!r} needs <base_config> <ingest_config>"
-    assert not all_data, "--all-data belongs to the retrained arm"
+    assert not sizes, "--sizes belongs to the retrained arm"
     label = label or ops
     return [_seg("ingest30-base-train", root, ops, base_cfg, "--label", label, *dirty),
             _seg("ingest30-loop", root, ops, ingest_cfg, "--label", label, *dirty)]
@@ -254,7 +254,7 @@ def run_arm(a) -> None:
     assert (Path(root) / "manifest.yaml").exists(), f"{root}: not an inited root"
     subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"])
     for i, cmd in enumerate(arm_commands(root, a.ops, base_config, ingest_config,
-                                         a.label, a.all_data, a.allow_dirty)):
+                                         a.label, a.sizes, a.allow_dirty)):
         run_stage("arm", f"{a.label or a.ops}-{i}", [cmd], root)
 
 
@@ -306,7 +306,7 @@ def _parser() -> argparse.ArgumentParser:
             "  meta arm gligen src/segmentation/configs/ingest30/base-train-gligen.yaml \\\n"
             "      src/segmentation/configs/ingest30/ingest-gligen.yaml <root> --allow-dirty\n"
             "  meta arm retrained src/segmentation/configs/ingest30/base-train-closed.yaml"
-            " --all-data <root>\n"
+            " --sizes 10,20,30 <root>\n"
             "  meta test_gt <root>\n"
             "  meta test_predict gligen <root>\n"
             "  meta test_score gligen <root>\n"
@@ -433,7 +433,7 @@ def _parser() -> argparse.ArgumentParser:
             "Train one arm.\n\n"
             "  gligen|closed:  meta arm <ops> <base_config> <ingest_config> <root>\n"
             "                  runs ingest30-base-train, then ingest30-loop\n"
-            "  retrained:      meta arm retrained <base_config> --all-data <root>\n"
+            "  retrained:      meta arm retrained <base_config> --sizes 10,20,30 <root>\n"
             "                  ONE config, closed ops on base + all pools, no loop\n\n"
             "Config paths resolve from segmentation/ (the subprocess cwd), e.g.\n"
             "src/segmentation/configs/ingest30/base-train-gligen.yaml. Flags may be\n"
@@ -445,8 +445,8 @@ def _parser() -> argparse.ArgumentParser:
                      help="3 positionals for gligen/closed, 2 for retrained")
     arm.add_argument("--label", default=None,
                      help="names runs/checkpacks/scores (default: the ops name)")
-    arm.add_argument("--all-data", action="store_true",
-                     help="retrained only: train on base + all pools")
+    arm.add_argument("--sizes", default=None,
+                     help="retrained arm only: comma list of catalog sizes, e.g. 10,20,30")
     arm.add_argument("--allow-dirty", action="store_true",
                      help="launch despite uncommitted submodule changes")
 
@@ -498,8 +498,8 @@ def _parser() -> argparse.ArgumentParser:
     return p
 
 
-ARM_VALUE_FLAGS = {"--label"}                       # arm flags that take one value
-ARM_BOOL_FLAGS = {"--all-data", "--allow-dirty"}     # arm flags that take none
+ARM_VALUE_FLAGS = {"--label", "--sizes"}             # arm flags that take one value
+ARM_BOOL_FLAGS = {"--allow-dirty"}                   # arm flags that take none
 
 
 def _reorder_arm_argv(rest: list[str]) -> list[str]:

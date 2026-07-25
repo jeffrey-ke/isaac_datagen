@@ -63,7 +63,7 @@ def test_bake_commands(tmp_path):
 
 def test_arm_commands_two_phase():
     cmds = arm_commands("/r", "gligen", "b.yaml", "i.yaml",
-                        label=None, all_data=False, allow_dirty=True)
+                        label=None, sizes=None, allow_dirty=True)
     joined = [" ".join(c.argv) for c in cmds]
     assert len(cmds) == 2
     assert "ingest30-base-train /r gligen b.yaml --label gligen" in joined[0]
@@ -74,14 +74,14 @@ def test_arm_commands_two_phase():
 
 def test_arm_retrained_maps_to_closed():
     cmds = arm_commands("/r", "retrained", "r.yaml", None,
-                        label=None, all_data=True, allow_dirty=False)
-    (cmd,) = cmds                                              # base-train ONLY, no loop
+                        label=None, sizes="10,20,30", allow_dirty=False)
+    (cmd,) = cmds                                              # retrain-loop ONLY, no ingest loop
     j = " ".join(cmd.argv)
-    assert "ingest30-base-train /r closed r.yaml --label retrained --all-data" in j
+    assert "ingest30-retrain-loop /r r.yaml --sizes 10,20,30 --label retrained" in j
     assert cmd.drop_pythonpath                                 # segmentation needs clean env
     with pytest.raises(AssertionError, match="retrained"):
         arm_commands("/r", "retrained", "r.yaml", "i.yaml",
-                     label=None, all_data=True, allow_dirty=False)
+                     label=None, sizes="10,20,30", allow_dirty=False)
 
 
 def test_test_gt_commands():
@@ -129,22 +129,22 @@ def test_arm_cli_parsing():
     a = parse_args(["arm", "gligen", "b.yaml", "i.yaml", "/r",
                     "--label", "x", "--allow-dirty"])
     assert _unpack_arm_positionals(a.args_) == ("b.yaml", "i.yaml", "/r")
-    assert a.label == "x" and a.allow_dirty and not a.all_data
+    assert a.label == "x" and a.allow_dirty and not a.sizes
 
     # (b) flags interspersed between the last two positionals
     a = parse_args(["arm", "gligen", "b.yaml", "i.yaml", "--label", "x", "/r"])
     assert _unpack_arm_positionals(a.args_) == ("b.yaml", "i.yaml", "/r")
-    assert a.label == "x" and not a.allow_dirty and not a.all_data
+    assert a.label == "x" and not a.allow_dirty and not a.sizes
 
     # (c) the spec transcript line: flag between the 2-item shape's two positionals
-    a = parse_args(["arm", "retrained", "r.yaml", "--all-data", "/r"])
+    a = parse_args(["arm", "retrained", "r.yaml", "--sizes", "10,20,30", "/r"])
     assert _unpack_arm_positionals(a.args_) == ("r.yaml", None, "/r")
-    assert a.all_data and a.label is None
+    assert a.sizes == "10,20,30" and a.label is None
 
     # (d) 2-item shape, flag trailing
-    a = parse_args(["arm", "retrained", "r.yaml", "/r", "--all-data"])
+    a = parse_args(["arm", "retrained", "r.yaml", "/r", "--sizes", "10,20,30"])
     assert _unpack_arm_positionals(a.args_) == ("r.yaml", None, "/r")
-    assert a.all_data and a.label is None
+    assert a.sizes == "10,20,30" and a.label is None
 
     # bad shape: neither 2 nor 3 positionals
     a = parse_args(["arm", "gligen", "only.yaml"])
