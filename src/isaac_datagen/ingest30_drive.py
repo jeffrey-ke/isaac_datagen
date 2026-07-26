@@ -113,22 +113,27 @@ def _seg_shell(script: str) -> Cmd:
                drop_pythonpath=True)
 
 
-def viz_commands(root, viz_classes) -> list[Cmd]:
+def viz_commands(root, viz_classes, labels=None) -> list[Cmd]:
     pred_dir = Path(root) / "predictions"
-    labels = sorted(d.name for d in pred_dir.iterdir() if d.is_dir()) if pred_dir.is_dir() else []
-    assert labels, f"{root}/predictions: no labels — run test_predict before --viz-class"
+    have = sorted(d.name for d in pred_dir.iterdir() if d.is_dir()) if pred_dir.is_dir() else []
+    assert have, f"{root}/predictions: no labels — run test_predict before --viz-class"
+    if labels is not None:                                       # --labels governs viz too
+        missing = [l for l in labels if l not in have]
+        assert not missing, f"{root}/predictions: no predictions for {missing} — run test_predict"
+        have = labels                                            # given order, like the curves
     q = shlex.quote
     return [_seg_shell(
                 f"uv run ingest30-class-idxs {q(str(root))} {q(cls)} | "
                 f"xargs uv run ingest30-view-sample {q(str(root))} {q(label)} "
                 f"--out {q(str(Path(root) / 'scores' / 'viz' / label / cls))}")
-            for cls in viz_classes for label in labels]
+            for cls in viz_classes for label in have]
 
 
-def curves_commands(root, attribution_iou, viz_classes=()) -> list[Cmd]:
-    cmds = [_seg("ingest30-curves", root, "--attribution-iou", str(attribution_iou))]
+def curves_commands(root, attribution_iou, viz_classes=(), labels=None) -> list[Cmd]:
+    sel = ["--labels", labels] if labels else []                 # raw comma string, verbatim
+    cmds = [_seg("ingest30-curves", root, "--attribution-iou", str(attribution_iou), *sel)]
     if viz_classes:
-        cmds += viz_commands(root, viz_classes)
+        cmds += viz_commands(root, viz_classes, labels.split(",") if labels else None)
     return cmds
 
 
@@ -301,7 +306,7 @@ def run_test_score(a) -> None:
 def run_curves(a) -> None:
     assert (Path(a.root) / "manifest.yaml").exists(), f"{a.root}: not an inited root"
     run_stage("curves", "all",
-              curves_commands(a.root, a.attribution_iou, a.viz_class), a.root)
+              curves_commands(a.root, a.attribution_iou, a.viz_class, a.labels), a.root)
 
 
 VERBS = {"init": run_init, "arm": run_arm, "test_gt": run_test_gt,
@@ -522,6 +527,11 @@ def _parser() -> argparse.ArgumentParser:
                      help="also render per-sample prediction strips for this class, "
                           "every predicted label, into <root>/scores/viz/ "
                           "(repeatable; needs predictions/ from test_predict)")
+    cur.add_argument("--labels", default=None,                   # NEW: comma form, like --steps
+                     help="comma-separated arm labels to plot, e.g. gligen,closed "
+                          "(default: all scored arms); figures go to "
+                          "scores/curves/labels-<set>/ and --viz-class strips "
+                          "are restricted to these labels")
 
     return p
 

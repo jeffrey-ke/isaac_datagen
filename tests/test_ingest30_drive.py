@@ -158,6 +158,40 @@ def test_verb_registry_complete():
     assert list(VERBS) == ["init", "arm", "test_gt", "test_predict", "test_score", "curves"]
 
 
+def test_curves_commands_labels_forwarded_verbatim():
+    (cmd,) = curves_commands("/r", 0.5, labels="gligen,closed")
+    assert " ".join(cmd.argv).endswith(
+        "ingest30-curves /r --attribution-iou 0.5 --labels gligen,closed")
+
+
+def test_curves_commands_no_labels_unchanged():
+    (cmd,) = curves_commands("/r", 0.5)
+    assert " ".join(cmd.argv).endswith("ingest30-curves /r --attribution-iou 0.5")
+
+
+def test_curves_cli_parsing_labels():
+    a = parse_args(["curves", "/r", "--attribution-iou", "0.5",
+                    "--labels", "gligen,closed"])
+    assert a.labels == "gligen,closed"
+    a = parse_args(["curves", "/r", "--attribution-iou", "0.5"])
+    assert a.labels is None
+
+
+def test_viz_commands_labels_filter_and_order(tmp_path):
+    for label in ("closed", "gligen", "winner"):
+        (tmp_path / "predictions" / label).mkdir(parents=True)
+    cmds = viz_commands(str(tmp_path), ["detergent009"], labels=["winner", "gligen"])
+    assert len(cmds) == 2                                    # closed filtered out
+    assert f"ingest30-view-sample {tmp_path} winner" in cmds[0].argv[-1]   # given order
+    assert f"ingest30-view-sample {tmp_path} gligen" in cmds[1].argv[-1]
+
+
+def test_viz_commands_selected_label_without_predictions_asserts(tmp_path):
+    (tmp_path / "predictions" / "gligen").mkdir(parents=True)
+    with pytest.raises(AssertionError, match="winner"):
+        viz_commands(str(tmp_path), ["a"], labels=["winner"])
+
+
 def test_arm_cli_parsing():
     # (a) contiguous positionals, flags trailing
     a = parse_args(["arm", "gligen", "b.yaml", "i.yaml", "/r",
