@@ -701,3 +701,14 @@ def test_pool_offset_sampler_cli_flag_default_and_choices():
         parse_args(["init", "b.txt", "i.txt", "/r",
                     "--descriptor", "D", "--descriptor-config", "d.yaml",
                     "--pool-offset-sampler", "NotAThing"])
+
+
+def test_curves_commands_viz_and_labels_composed(tmp_path):
+    for label in ("closed", "gligen", "winner"):
+        (tmp_path / "predictions" / label).mkdir(parents=True)
+    cmds = curves_commands(str(tmp_path), 0.5, ["detergent009"], labels="winner,gligen")
+    assert len(cmds) == 3                                    # 1 curves + 2 strips
+    assert " ".join(cmds[0].argv).endswith(
+        f"ingest30-curves {tmp_path} --attribution-iou 0.5 --labels winner,gligen")
+    assert f"ingest30-view-sample {tmp_path} winner" in cmds[1].argv[-1]   # given order
+    assert f"ingest30-view-sample {tmp_path} gligen" in cmds[2].argv[-1]
